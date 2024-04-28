@@ -68,7 +68,7 @@ class ActorCriticModel {
         cumulativeSum += this.priorities[j];
         if (cumulativeSum > rand) {
           batch.push(this.memory[j]);
-          if (this.memory.length >= this.maxMemorySize) 
+          if (this.memory.length >= this.maxMemorySize)
             this.memory.shift();
           break;
         }
@@ -140,29 +140,31 @@ class ActorCriticModel {
   // }
 }
 
-const model = new ActorCriticModel(93, 2, 128);
+
+let continueLoop = false;
+let loopCount=0;
 let states = [];
 let oldStates = []
 let actions = [0, 0];
 let rewards = [];
-let qTable = [];
+let totalRewards = 0;
+let wallHitReward = 0;
+let baddyHitReward = 0;
 
 // Hyperparameters
 const numEpisodes = 10000;
 const gamma = 0.95;  // Discount factor
 const numActions = 2;
 const numInputs = 93;
-for (let i = 0; i < numEpisodes; i++) {
-  qTable.push(new Array(numActions).fill(0));
-}
-
+const numHidden = 128;
+const model = new ActorCriticModel(numInputs, 2, 256);
 const winWidth = +$(window).width();
 const winHeight = +$(window).height();
 const maxWinSide = Math.max(winWidth, winHeight);
 const eyeMaxRange = 1000;
 var oneRad = Math.PI / 180;
 var pi2 = Math.PI * 2;
-var gameSpeed = 5;
+var gameSpeed = 20;
 var EPS = 0.01;
 
 function clone(v) {
@@ -369,9 +371,9 @@ Square.prototype.rayIntersect = function (o, d) {
   return [p1, p2];
 }
 
-function turnTo(dir1, dir2, isMoving) {
+function turnTo(dir1, dir2) {
   if (equals(dir1, dir2)) return clone(dir1);
-  return lerp(dir1, dir2, isMoving ? 0.1 : 0);
+  return lerp(dir1, dir2, 1);
 }
 
 var mouse = {
@@ -494,11 +496,27 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
   const p1 = agent.p;
   // collide with walls
   if (check_walls) {
-    for (var i = 0, n = blocks.length; i < n; i++) {
-      var wall = blocks[i].bounds;
-      var res = lineIntersectsSquare(p1, p2, blocks[i]);
+    const windowWalls = [
+      { bounds: { x: 0, y: 0, width: window.innerWidth, height: 0 } }, // top
+      { bounds: { x: window.innerWidth, y: window.innerHeight, width: window.innerWidth, height: 0 } }, // bottom
+      //{ bounds: { x: 0, y: 0, width: 0, height: window.innerHeight }} , // left
+      //{ bounds: { x: window.innerWidth, y: 0, width: 0, height: window.innerHeight }} // right
+    ];
+    const windowWallsXY = { bounds: windowWalls.map(wall => [wall.bounds.x, wall.bounds.y]) }
+    // const windowWalls = [
+    //   { bounds: { x: 0, y: 0, width: window.innerWidth, height: 0 }} , // top
+    //   { bounds: { x: 0, y: window.innerHeight, width: window.innerWidth, height: 0 }} , // bottom
+    //   { bounds: { x: 0, y: 0, width: 0, height: window.innerHeight }} , // left
+    //   { bounds: { x: window.innerWidth, y: 0, width: 0, height: window.innerHeight }} // right
+    // ];
+    const allWalls = blocks;//.concat(windowWallsXY);
+
+    for (var i = 0, n = allWalls.length; i < n; i++) {
+      var wall = allWalls[i];
+
+      let res = lineIntersectsSquare(p1, p2, wall);
       if (res) {
-        res.type = 0; // 0 is wall
+        res.type = -.1; // 0 is wall
         if (!minres) { minres = res; }
         else {
           // check if its closer
@@ -517,7 +535,7 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
       var it = agent.items[i];
       var res = line_point_intersect(p1, p2, it.p, it.rad);
       if (res) {
-        res.type = it.type; // store type of item
+        res.type = it.type.isHuman ? 1 : -1; // store type of item
         res.vx = it.v.x; // velocty information
         res.vy = it.v.y;
         if (!minres) { minres = res; }
@@ -633,8 +651,11 @@ Agent.prototype.getVision = () => {
         e.vy = 0;
       }
       ctx.strokeStyle = "rgb(255,150,150)";
-      if (e.sensed_type === -.1 || e.sensed_type === 0) {
-        ctx.strokeStyle = "rgb(200,200,200)"; // wall or nothing
+      if (e.sensed_type === -.1) {
+        ctx.strokeStyle = "yellow"; // wall
+      }
+      if (e.sensed_type === 0) {
+        ctx.strokeStyle = "rgb(200,200,200)"; //nothing
       }
       if (e.sensed_type === 1) { ctx.strokeStyle = "rgb(255,150,150)"; } // human
       //if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
@@ -694,6 +715,7 @@ Agent.prototype.see = function () {
   var seen = [];
   var a, d, ato;
   for (var i = 0, l = agents.length; i < l; i++) {
+    // check if what we see is blocked by a wall   
     a = agents[i];
     if (a === this) continue;
     d = this.distTo(a.pos);
@@ -714,12 +736,25 @@ Agent.prototype.see = function () {
     } else {
       if (ato >= a1 && ato <= a2) good = true;
     }
-    if (good)
-      seen.push({
-        agent: a,
-        dist: d,
-        angle: normalize(sub(a.pos, this.pos))
-      });
+    if (good) {
+      const angle = normalize(sub(a.pos, this.pos))
+      viewBlocked = false;
+      for (var wi = 0, wl = blocks.length; wi < wl; wi++) {
+        // todo: why was this only = not ==
+        if (walls = blocks[wi].rayIntersect(a.pos, angle)) {
+          if (walls[0].dist > 0 && walls[0].dist < d) {
+            viewBlocked = true;
+            break;
+          }
+        }
+      }
+      if (!viewBlocked)
+        seen.push({
+          agent: a,
+          dist: d,
+          angle: angle
+        });
+    }
   }
 
   if (seen.length > 1) seen.sort(function (a, b) {
@@ -766,8 +801,7 @@ Agent.prototype.logic = async function (ctx, clock) {
 
   this.op = this.pos;
   var seen = this.see();
-  
-  var walls, viewBlocked;
+
   // convert humans to zombie
   if (this.type === 'zombie' && seen.length) {
     for (var i = 0, l = seen.length; i < l; i++) {
@@ -777,6 +811,7 @@ Agent.prototype.logic = async function (ctx, clock) {
 
         //tf ml reward
         --seen[i].agent.rewardSignal;
+        --agents.filter(a => a.id === seen[i].agent.id)[0].rewardSignal;
 
         if (seen[i].agent.currentHp < 1) {
           seen[i].agent.isHuman = false;
@@ -805,21 +840,10 @@ Agent.prototype.logic = async function (ctx, clock) {
       this.newDir = seen[i].angle;
       break;
     }
-    // check if what we see is blocked by a wall
 
-    viewBlocked = false;
-    for (var wi = 0, wl = blocks.length; wi < wl; wi++) {
-      // todo: why was this only = not ==
-      if (walls = blocks[wi].rayIntersect(this.pos, seen[i].angle)) {
-        if (walls[0].dist > 0 && walls[0].dist < seen[i].dist) {
-          viewBlocked = true;
-          break;
-        }
-      }
-    }
 
     if (this.type === 'zombie') {
-      if (viewBlocked) continue;
+      if (!seen) continue;
       // attack human
       if (agentType === 'human') {
         this.state = 'attack';
@@ -866,7 +890,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       actions.push(continuousAction, binaryAction);
       //choose current action, [rotate, move or shoot]        
       // -pi to pi
-      const newAngle = (continuousAction) * Math.PI;
+      const newAngle = Math.tanh(continuousAction) * Math.PI;
       isMoving = binaryAction >= .5;
       this.newDir = { x: Math.cos(newAngle), y: Math.sin(newAngle) };
     }
@@ -879,7 +903,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     if (this.ring > 100) this.ring = 0;
   }
   this.nextTimer -= clock.delta;
-  // zombies when timer runs out go back to random wandering
+  //zombies when timer runs out go back to random wandering
   if (this.isHuman === false && this.nextTimer <= 0) {
     this.nextTimer = 3 + Math.random() * 10;
     this.newDir = randomAngle();
@@ -890,7 +914,7 @@ Agent.prototype.logic = async function (ctx, clock) {
   //this.newDir=pointFromRad(this.da);
   // turn twards desired direction
   // todo. find out max turn rate and if it applies here for humans (isMoving)
-  this.dir = turnTo(this.dir, this.newDir, true);
+  this.dir = turnTo(this.dir, this.newDir);
 
   var speed = isMoving ? (this.speed) * 10 : 0;
 
@@ -940,6 +964,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     bound = true;
   }
   if (bound) {
+    this.rewardSignal = this.rewardSignal - .1;
     normalize(this.newDir);
   }
   if (!isMoving)
@@ -979,11 +1004,13 @@ Agent.prototype.logic = async function (ctx, clock) {
     const qValueCurrent = (oldQValueContinuous, oldQValueBinary) / 2;
     const tdError = this.rewardSignal + gamma * qValueNextState - qValueCurrent;
     model.remember(oldStates, actions, this.rewardSignal, states, tdError);
-    this.rewardSignal=0;
+    totalRewards += this.rewardSignal;
+    $("#rewardTotal").text(totalRewards);
+    this.rewardSignal = 0;
   }
 }
 Agent.prototype.shoot = (agent, seen) => {
-  const shootAngle = 1;//rads
+  const shootAngle = .5;//rads
 
   const baddies = agent.items.filter(item => item.isHuman === false && seen.some(seenItem => seenItem.agent.id === item.id));
   const newDirNorm = normalize(agent.dir);
@@ -1014,11 +1041,7 @@ Agent.prototype.shoot = (agent, seen) => {
     if (distance < minDistance) {
       minDistance = distance;
       closestBaddy = baddy;
-      //closestBaddy.agent.viewFov = this.viewFov;
-      //closestBaddy.agent.viewFovD2 = this.viewFovD2;
-      closestBaddy.speed = 0;
-      //closestBaddy.agent.turnSpeed = this.turnSpeed;
-      closestBaddy.state = 'idle';
+
 
     }
   });
@@ -1029,15 +1052,25 @@ Agent.prototype.shoot = (agent, seen) => {
   ctx.strokeStyle = 'orange';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
-    agent.rewardSignal += .9;
+    agent.rewardSignal += .8;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
-    closestBaddy.ring = 10;
-    if (closestBaddy.hp < 1)
+    if (closestBaddy.currentHp < 1)
+
+      closestBaddy.ring = 10;
+    if (closestBaddy.hp < 1) {
+      //closestBaddy.agent.viewFov = this.viewFov;
+      //closestBaddy.agent.viewFovD2 = this.viewFovD2;
+      closestBaddy.speed = 0;
+      //closestBaddy.agent.turnSpeed = this.turnSpeed;
+      closestBaddy.state = 'idle';
       closestBaddy.ring = 20;
+      agents = agents.filter(agent => agent !== closestBaddy);
+      agent.items - agent.items.filter(agent => agent !== closestBaddy);
+    }
   }
   else {
-    ctx.lineTo(agent.pos.x +agent.dir.x * eyeMaxRange, agent.pos.y+ agent.dir.y * eyeMaxRange);
+    ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
   }
   ctx.stroke();
 
@@ -1099,8 +1132,7 @@ var clock = {
   time: 0,
   delta: 0
 };
-let useAnimationFrame = true;
-let intervalId = null;
+
 async function mainLoop(time) {
   if (!time) {
     time = Date.now();
@@ -1127,7 +1159,7 @@ async function mainLoop(time) {
     if (agents[i].type === 'human') hCnt++;
     if (agents[i].type === 'zombie') zCnt++;
     await agents[i].logic(ctx, clock);
-    agents[i].draw(ctx, clock);
+    agents[i].draw(ctx);
   }
 
   ctx.font = '20pt Calibri';
@@ -1145,41 +1177,44 @@ async function mainLoop(time) {
   ctx.lineWidth = 1;
   ctx.strokeStyle = '#FFFFFF';
   ctx.stroke();
-  if (useAnimationFrame) {
-    // Schedule the next frame
-    requestAnimationFrame(mainLoop);
-  }
+  // if (continueLoop) {goTooFast();} else{
+  //   // Schedule the next frame
+  //   requestAnimationFrame(mainLoop);
+  // }
   fpsc++;
 }
-function startInterval() {
-  intervalId = setInterval(mainLoop, 0);  // 60 FPS
-}
-function stopInterval() {
-  if (intervalId !== null) {
-    clearInterval(intervalId);
-    intervalId = null;
-  }
-}
-let running = true;
-
-async function goTooFast() {
-  while (running) {
-    // Your existing mainLoop code...
-  }
+function goTooFast() {
+  mainLoop().then(() => {
+    loopCount++;
+    if (loopCount >= 500 || !continueLoop) {
+      loopCount = 0;
+      requestAnimationFrame(goTooFast);
+    } else if (continueLoop) {
+      goTooFast();
+    }
+    
+  });
 }
 
-mainLoop();
+// async function goTooFast() {
+//   await mainLoop();
+//   while (continueLoop) {
+//     if (count < 500) {
+//       await mainLoop();
+//     } else {
+//       requestAnimationFrame(mainLoop);
+//       count = 0;
+
+//     }
+//     count++;
+//   }
+// }
+goTooFast();
 //////////////////////////////////////
-requestAnimationFrame(mainLoop);
+
 window.addEventListener('keydown', (event) => {
   if (event.code === 'Space') {
-    useAnimationFrame = !useAnimationFrame;
-    if (useAnimationFrame) {
-      stopInterval();
-      requestAnimationFrame(mainLoop);
-    } else {
-      startInterval();
-    }
+    continueLoop = !continueLoop;
   }
 });
 setInterval(function () {
@@ -1211,7 +1246,7 @@ $(function () {
     $(this).hide();
   });
   const windowArea = $(window).width() * $(window).height();
-  const blockNum = 5;//windowArea / 20000;
+  const blockNum = windowArea / 50000;
   for (var i = 0, l = blockNum; i < l; i++) {
     blocks.push(new Square({}));
   }
@@ -1221,7 +1256,7 @@ $(function () {
     agents.push(new Agent({
       id: i + 1,
       type: i < numHumans ? 'human' : 'zombie',
-      viewDist:100,
+      viewDist: 1000,
       pos: {
         x: canvas.width * Math.random(),
         y: canvas.height * Math.random()
@@ -1230,7 +1265,9 @@ $(function () {
 
   }
   const humans = agents.filter(a => a.isHuman === true);
-  humans.forEach(h => {h.items = agents.filter(a => a.id !== h.id);
-                        h.viewDist=1000;});
+  humans.forEach(h => {
+    h.items = agents.filter(a => a.id !== h.id);
+    h.viewDist = 1000;
+  });
 
 })
