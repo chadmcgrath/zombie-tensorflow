@@ -1,32 +1,37 @@
 class ActorCriticModel {
   constructor(numInputs, numActions, hiddenUnits) {
+    this.maxMemory = 10000;
     this.numInputs = numInputs;
     this.numActions = numActions;
     this.hiddenUnits = hiddenUnits;
 
     this.actor = this.createActorModel();
     this.critic = this.createCriticModel();
+    this.memory = [];
+    this.alpha = 0.6;  // Controls how much prioritization is used
+    this.priorities = [];
+
   }
 
   createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
-  
+
     const hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(stateInput);
-  
+
     // Separate output layers for each action
     const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh' }).apply(hidden);  // Q-value for continuous action
     const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid' }).apply(hidden);  // Q-value for binary action
-  
+
     //const output = tf.layers.concatenate().apply([continuousAction, binaryAction]);
-  
-    const model = tf.model({ inputs: [stateInput,actionInput], outputs: [continuousAction, binaryAction] });
-  
+
+    const model = tf.model({ inputs: [stateInput, actionInput], outputs: [continuousAction, binaryAction] });
+
     const customLoss = (yTrue, yPred) => { // Compute your custom loss here based on yTrue and yPred // 
-      tf.mean(tf.square(tf.sub(yPred, yTrue))); 
+      tf.mean(tf.square(tf.sub(yPred, yTrue)));
     };
     model.compile({ optimizer: 'adam', loss: customLoss });
-  
+
     return model;
   }
 
@@ -44,21 +49,74 @@ class ActorCriticModel {
     model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
 
     return model;
-  } 
+  }
+  remember(state, action, reward, nextState, error) {
+    if (this.memory.length >= this.maxMemorySize) {
+      this.memory.shift();
+      this.priorities.shift();
+    }
+    this.memory.push([state, action, reward, nextState]);
+    this.priorities.push(Math.pow(error + 1e-6, this.alpha));  // Prioritize experiences with higher error
+  }
+  sample(batchSize) {
+    const prioritiesSum = this.priorities.reduce((a, b) => a + b, 0);
+    const batch = [];
+    for (let i = 0; i < batchSize; i++) {
+      const rand = Math.random() * prioritiesSum;
+      let cumulativeSum = 0;
+      for (let j = 0; j < this.memory.length; j++) {
+        cumulativeSum += this.priorities[j];
+        if (cumulativeSum > rand) {
+          batch.push(this.memory[j]);
+          if (this.memory.length >= this.maxMemorySize) 
+            this.memory.shift();
+          break;
+        }
+      }
+    }
+    return batch;
+  }
+  async train(batchSize, gamma) {
+    const batch = [];
+    for (let i = 0; i < batchSize; i++) {
+      const index = Math.floor(Math.random() * this.memory.length);
+      batch.push(this.memory[index]);
+    }
 
+    for (let { state, action, reward, nextState, done } of batch) {
+      const [__, ___, newQValue1, newQValue2] = this.predict(nextState, action);  // Use nextState here
+      const targetQValue1 = reward;
+      const targetQValue2 = reward;
+      if (!done) {
+        targetQValue1 += gamma * newQValue1;
+        targetQValue2 += gamma * newQValue2;
+      }
+
+      await this.fitCritic([state, action], [targetQValue1, targetQValue2]);
+
+      const predictions = this.predict(state, action);  // Use state here
+      const actorLoss1 = tf.mean(tf.square(predictions[0] - targetQValue1));
+      const actorLoss2 = tf.mean(tf.square(predictions[1] - targetQValue2));
+      const actorLoss = tf.add(actorLoss1, actorLoss2);
+      const averageQValue = tf.mean([newQValue1, newQValue2]);
+      const advantages = tf.sub([newQValue1, newQValue2], averageQValue);
+
+      await this.fitActor(state, advantages);
+    }
+  }
   async fitActor(states, actions, rewards) {
     //trainOnBatch?
     await this.actor.fit(states, actions);
-  }async fitCritic(states, actions, q) {
+  } async fitCritic(states, actions, q) {
     //trainOnBatch?
-    await this.critic.fit([states, actions],q);
+    await this.critic.fit([states, actions], q);
   }
   predict(state, actions) {
     return tf.tidy(() => {
       const stateTensor = tf.tensor2d([state]);
       const actionTensor = tf.tensor2d([actions]);
-    const actorOutput = this.actor.predict([stateTensor, actionTensor]);
-    const criticOutput = this.critic.predict([stateTensor, actionTensor]);
+      const actorOutput = this.actor.predict([stateTensor, actionTensor]);
+      const criticOutput = this.critic.predict([stateTensor, actionTensor]);
       if (Array.isArray(actorOutput) && actorOutput.length === 2 && Array.isArray(criticOutput) && criticOutput.length === 2) {
         const [continuousActionTensor, binaryActionTensor] = actorOutput;
         const continuousAction = continuousActionTensor.dataSync()[0];
@@ -72,7 +130,7 @@ class ActorCriticModel {
       }
     });
   }
-  
+
 
   // predict(state) {
   //   const stateTensor = state;//angleOutput, binaryOutput = actionProbs;tf.tensor2d([state],[1, state.length]);
@@ -84,13 +142,13 @@ class ActorCriticModel {
 
 const model = new ActorCriticModel(93, 2, 128);
 let states = [];
-let oldActions = []
-let actions = [0,0];
+let oldStates = []
+let actions = [0, 0];
 let rewards = [];
 let qTable = [];
 
 // Hyperparameters
-const numEpisodes = 1000;
+const numEpisodes = 10000;
 const gamma = 0.95;  // Discount factor
 const numActions = 2;
 const numInputs = 93;
@@ -483,7 +541,7 @@ var Eye = function (angle) {
 function Agent(config) {
   this.id = config.id;
 
-  const maxHp = 50;
+  const maxHp = 50000000;
   const eyeCount = 30;
   this.eyes = [];
   this.rewardSignal = 0;
@@ -519,7 +577,7 @@ function Agent(config) {
   //todo: remove duplicate position
   Object.defineProperty(this, 'angle', {
     get: function () {
-      return this.newDir;
+      return this.dir;
     }
   });
   Object.defineProperty(this, 'p', {
@@ -541,7 +599,7 @@ function Agent(config) {
 
 Agent.prototype.getVision = () => {
 
-  let eyeStates =[];
+  let eyeStates = [];
   for (var i = 0, n = this.agents.length; i < n; i++) {
     var a = this.agents[i];
     const pos = a.p;
@@ -704,12 +762,11 @@ Agent.prototype.see = function () {
   return seen;
 }
 
-Agent.prototype.logic = function (ctx, clock) {
-
-  this.oangle = Math.atan2(this.newDir.x, this.newDir.x);
+Agent.prototype.logic = async function (ctx, clock) {
 
   this.op = this.pos;
   var seen = this.see();
+  
   var walls, viewBlocked;
   // convert humans to zombie
   if (this.type === 'zombie' && seen.length) {
@@ -719,7 +776,7 @@ Agent.prototype.logic = function (ctx, clock) {
         --seen[i].agent.currentHp;
 
         //tf ml reward
-        --this.rewardSignal;
+        --seen[i].agent.rewardSignal;
 
         if (seen[i].agent.currentHp < 1) {
           seen[i].agent.isHuman = false;
@@ -777,44 +834,45 @@ Agent.prototype.logic = function (ctx, clock) {
       }
     }
   }   // for i in seen
+  let continuousAction, binaryAction, oldQValueContinuous, oldQValueBinary;
   if (this.isHuman) {
     this.state = 'panic';
     this.nextTimer = 5;
 
 
-    if (states.length <1) {
+    if (states.length < 1) {
       states = [];
       states.push(...this.getVision());
-      states.push(Math.atan2(this.newDir.x, this.newDir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
+      states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
     }
-      let [continuousAction, binaryAction, _,___] = model.predict(states,actions);
+    [continuousAction, binaryAction, oldQValueContinuous, oldQValueBinary] = model.predict(states, actions);
 
-      // Perform action and get new state and reward
-      if (this.isHuman) {
-        states = [];
-        states.push(...this.getVision());
-        states.push(Math.atan2(this.newDir.x, this.newDir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
-      }
+    // Perform action and get new state and reward
 
-      this.rewardSignal = 0;
-      let epsilon = .01;
+    oldStates = [...states];
+    states = [];
+    states.push(...this.getVision());
+    states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
 
-      if (Math.random() < epsilon) {
-        // Take a random action
-        this.newDir = randomAngle();
-        isMoving = Math.random() >= .5;
-      } else {
-        actions=[];
-        actions.push(continuousAction, binaryAction);
-        //choose current action, [rotate, move or shoot]        
-         // -pi to pi
-        const newAngle = (continuousAction) * Math.PI;
-        isMoving = binaryAction >= .5;
-        this.newDir = { x: Math.cos(newAngle), y: Math.sin(newAngle) };     
-      }
+    this.rewardSignal = 0;
+    let epsilon = .15;
 
+    if (Math.random() < epsilon) {
+      // Take a random action
+      this.newDir = randomAngle();
+      isMoving = Math.random() >= .5;
+    } else {
+      actions = [];
+      actions.push(continuousAction, binaryAction);
+      //choose current action, [rotate, move or shoot]        
+      // -pi to pi
+      const newAngle = (continuousAction) * Math.PI;
+      isMoving = binaryAction >= .5;
+      this.newDir = { x: Math.cos(newAngle), y: Math.sin(newAngle) };
     }
-  
+
+  }
+
 
   if (this.ring) {
     this.ring += clock.delta * 20;
@@ -886,31 +944,49 @@ Agent.prototype.logic = function (ctx, clock) {
   }
   if (!isMoving)
     this.shoot(this, seen);
-  
-  if(this.isHuman === true && states.length > 0)
-  {
-  // Predict Q-value for new state
-  const [__, ___, newQValue1, newQValue2] = model.predict(states, actions);
 
-  // Compute target Q-values
-  const targetQValue1 = this.rewardSignal + gamma * newQValue1;
-const targetQValue2 = this.rewardSignal + gamma * newQValue2;
-  // Update critic model
-  model.fitCritic([states, actions], [targetQValue1,targetQValue2]);
+  if (this.isHuman === true && states.length > 0) {
+    const batchSize = 32;
+    const batch = [];
+    for (let i = 0; i < batchSize; i++) {
+      const index = Math.floor(Math.random() * model.memory.length);
+      batch.push(model.memory[index]);
+      if (model.memory.length >= model.maxMemorySize) {
+        model.memory.shift();
+      }
+    }
+    const sample = model.sample(batchSize);
+    for (let { oldStates, actions, rewardSignal, states } of sample) {
+      // Predict Q-value for new state
+      const [__, ___, newQValue1, newQValue2] = model.predict(states, actions);
 
-  const qValues = [newQValue1, newQValue2];
+      // Compute target Q-values
+      const targetQValue1 = rewardSignal + gamma * newQValue1;
+      const targetQValue2 = rewardSignal + gamma * newQValue2;
+      // Update critic model
+      await model.fitCritic([states, actions], [targetQValue1, targetQValue2]);
 
-const averageQValue = tf.mean(qValues);
-const advantages = tf.sub(qValues, averageQValue);
-  // Update actor model
-  model.fitActor(states, advantages);
+      const qValues = [newQValue1, newQValue2];
+
+      const averageQValue = tf.mean(qValues);
+      const advantages = tf.sub(qValues, averageQValue);
+      // Update actor model
+      await model.fitActor(oldStates, advantages);
+    }
+    //currentQValue = currentQValue + learningRate * (reward + discountFactor * maxQValueNextState - currentQValue);
+    const [__, ___, newQValue1, newQValue2] = model.predict(states, actions);
+    const qValueNextState = (newQValue1 + newQValue2) / 2;
+    const qValueCurrent = (oldQValueContinuous, oldQValueBinary) / 2;
+    const tdError = this.rewardSignal + gamma * qValueNextState - qValueCurrent;
+    model.remember(oldStates, actions, this.rewardSignal, states, tdError);
+    this.rewardSignal=0;
   }
-
 }
 Agent.prototype.shoot = (agent, seen) => {
   const shootAngle = 1;//rads
-  const baddies = agent.items.filter(item => item.isHuman === false && seen.some(seenItem => seenItem.id === item.id));
-  const newDirNorm = normalize(agent.newDir);
+
+  const baddies = agent.items.filter(item => item.isHuman === false && seen.some(seenItem => seenItem.agent.id === item.id));
+  const newDirNorm = normalize(agent.dir);
 
   const baddiesInRange = baddies.filter(baddy => {
     const baddyDir = { x: baddy.pos.x - agent.pos.x, y: baddy.pos.y - agent.pos.y };
@@ -940,19 +1016,20 @@ Agent.prototype.shoot = (agent, seen) => {
       closestBaddy = baddy;
       //closestBaddy.agent.viewFov = this.viewFov;
       //closestBaddy.agent.viewFovD2 = this.viewFovD2;
-      closestBaddy.agent.speed = 0;
+      closestBaddy.speed = 0;
       //closestBaddy.agent.turnSpeed = this.turnSpeed;
-      closestBaddy.agent.state = 'idle';
+      closestBaddy.state = 'idle';
 
     }
   });
 
-  // Draw a red line to the closest baddy
+  // Draw orange line to the closest baddy
+  // todo: keep it alive on canvas
   ctx.beginPath();
   ctx.strokeStyle = 'orange';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
-    rewardSignal += .9;
+    agent.rewardSignal += .9;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
     closestBaddy.ring = 10;
@@ -960,7 +1037,7 @@ Agent.prototype.shoot = (agent, seen) => {
       closestBaddy.ring = 20;
   }
   else {
-    ctx.lineTo(agent.newDir.x * eyeMaxRange, agent.newDir.y * eyeMaxRange);
+    ctx.lineTo(agent.pos.x +agent.dir.x * eyeMaxRange, agent.pos.y+ agent.dir.y * eyeMaxRange);
   }
   ctx.stroke();
 
@@ -1022,8 +1099,9 @@ var clock = {
   time: 0,
   delta: 0
 };
-
-function mainLoop(time) {
+let useAnimationFrame = true;
+let intervalId = null;
+async function mainLoop(time) {
   if (!time) {
     time = Date.now();
   }
@@ -1048,7 +1126,7 @@ function mainLoop(time) {
   for (var i = 0, l = agents.length; i < l; i++) {
     if (agents[i].type === 'human') hCnt++;
     if (agents[i].type === 'zombie') zCnt++;
-    agents[i].logic(ctx, clock);
+    await agents[i].logic(ctx, clock);
     agents[i].draw(ctx, clock);
   }
 
@@ -1067,11 +1145,43 @@ function mainLoop(time) {
   ctx.lineWidth = 1;
   ctx.strokeStyle = '#FFFFFF';
   ctx.stroke();
-  requestAnimationFrame(mainLoop);
+  if (useAnimationFrame) {
+    // Schedule the next frame
+    requestAnimationFrame(mainLoop);
+  }
   fpsc++;
 }
+function startInterval() {
+  intervalId = setInterval(mainLoop, 0);  // 60 FPS
+}
+function stopInterval() {
+  if (intervalId !== null) {
+    clearInterval(intervalId);
+    intervalId = null;
+  }
+}
+let running = true;
+
+async function goTooFast() {
+  while (running) {
+    // Your existing mainLoop code...
+  }
+}
+
+mainLoop();
 //////////////////////////////////////
 requestAnimationFrame(mainLoop);
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'Space') {
+    useAnimationFrame = !useAnimationFrame;
+    if (useAnimationFrame) {
+      stopInterval();
+      requestAnimationFrame(mainLoop);
+    } else {
+      startInterval();
+    }
+  }
+});
 setInterval(function () {
   fps = fpsc;
   fpsc = 0;
@@ -1111,6 +1221,7 @@ $(function () {
     agents.push(new Agent({
       id: i + 1,
       type: i < numHumans ? 'human' : 'zombie',
+      viewDist:100,
       pos: {
         x: canvas.width * Math.random(),
         y: canvas.height * Math.random()
@@ -1119,90 +1230,7 @@ $(function () {
 
   }
   const humans = agents.filter(a => a.isHuman === true);
-  humans.forEach(h => h.items = agents.filter(a => a.id !== h.id));
+  humans.forEach(h => {h.items = agents.filter(a => a.id !== h.id);
+                        h.viewDist=1000;});
 
 })
-
-
-
-// class ActorCriticModel {
-//   constructor(numInputs, numActions, hiddenUnits) {
-//     this.numInputs = numInputs;
-//     this.numActions = numActions;
-//     this.hiddenUnits = hiddenUnits;
-
-//     this.actor = this.createActorModel();
-//     this.critic = this.createCriticModel();
-//   }
-
-//   createActorModel() {
-//     const stateInput = tf.input({ shape: [this.numInputs] });
-  
-//     const hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(stateInput);
-  
-//     // Separate output layers for each action
-//     const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh' }).apply(hidden);  // Q-value for continuous action
-//     const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid' }).apply(hidden);  // Q-value for binary action
-  
-//     const output = tf.layers.concatenate().apply([continuousAction, binaryAction]);
-  
-//     const model = tf.model({ inputs: stateInput, outputs: output });
-  
-//     model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
-  
-//     return model;
-//   }
-
-//   // createCriticModel() {
-//   //   const model = tf.sequential();
-//   //   model.add(tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', inputShape: [this.numInputs] }));
-//   //   model.add(tf.layers.dense({ units: 1 }));
-//   //   return model;
-//   // }
-//   createCriticModel() {
-//     const stateInput = tf.input({ shape: [this.numInputs] });
-//     const actionInput = tf.input({ shape: [this.numActions] });
-
-//     const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(stateInput);
-//     const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(actionInput);
-
-//     const merged = tf.layers.concatenate([stateHidden, actionHidden]);
-
-//     const output = tf.layers.dense({ units: 1 }).apply(merged);
-
-//     const model = tf.model({ inputs: [stateInput, actionInput], outputs: output });
-
-//     model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
-
-//     return model;
-//   }
-//   predict(state) {
-//     return tf.tidy(() => {  // tf.tidy automatically disposes of any tensors created inside this function
-//       const stateTensor = tf.tensor2d([state]);
-
-//       // Actor model predicts the actions
-//       const [continuousActionTensor, binaryActionTensor] = this.actor.predict(stateTensor);
-
-//       // Convert tensors to JavaScript arrays
-//       const continuousAction = continuousActionTensor.arraySync()[0];
-//       const binaryAction = binaryActionTensor.arraySync()[0];
-
-//       // Concatenate state and action tensors
-//       const stateActionTensor = tf.concat([stateTensor, tf.tensor2d([continuousAction, binaryAction])], 1);
-
-//       // Critic model predicts the Q-value for the state-action pair
-//       const criticOutput = this.critic.predict(stateActionTensor).arraySync()[0];
-
-//       return [continuousAction, binaryAction, criticOutput];
-//     });
-//   }
-
-//   // predict(state) {
-//   //   const stateTensor = state;//angleOutput, binaryOutput = actionProbs;tf.tensor2d([state],[1, state.length]);
-//   //   const actorOutput = this.actor.predict(stateTensor);
-//   //   const criticOutput = this.critic.predict(stateTensor);
-//   //   return [actorOutput, criticOutput];
-//   // }
-// }
-
-// const model = new ActorCriticModel(93, 2, 128);
