@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8">
+  <title>CodePen - Zombie simulator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/5.0.0/normalize.min.css">
+<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'><link rel="stylesheet" href="./style.css">
+
+</head>
+<body>
+<!-- partial:index.partial.html -->
+<input id="gameSpeed" type="range" min="1" max="20" step="1" value="5" title="Game Speed"/>
+<canvas id="canvas" width="600" height="600"></canvas>
+<div id="help">
+  <pre>
+Blue=Human
+Yellow=Human Panicked
+Green=Zombie  
+Red=Zombie attacked
+Panicked Humans move faster
+If a human sees a panicked human they panic
+Humans and Zombies can't move or see through walls
+Time stops when all humans are un-dead
+Number of buildings and humans are relative to window size
+Slider at bottom changes simulation speed.
+<a target="_top" href="https://codepen.io/paulrobello/full/ybqpJq">
+Check out V2</a>
+
+Click inside this box to close it.</pre>
+<div id="agentAngle1"></div>
+<div id="agentAngle2"></div>
+</div>
+<!-- partial -->
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/jquery/2.2.2/jquery.min.js'></script>
+<script src='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js'></script>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.6.1/lodash.min.js'></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script  src="./script.js"></script>
+
+</body>
+</html>

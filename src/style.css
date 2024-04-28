@@ -1,0 +1,35 @@
+body {
+  background: black;
+  padding:0;
+  margin:0;
+  overflow:hidden;
+}
+
+#canvas {
+  border:0;
+}
+
+#gameSpeed {
+  position:absolute;
+  bottom:0;
+}
+
+#help {
+  position:absolute;
+  display:inline-block;
+  top:0;
+  left:0;
+  width:450px;
+  height:275px;
+  border:3px inset #AAA;
+  overflow:hidden;
+  background:white;
+  color:black;
+  padding:5px;
+}
+pre {
+  border:0;
+  background:white;
+  color:black;
+  padding:0;
+}
