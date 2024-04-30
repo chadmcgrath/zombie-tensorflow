@@ -17,8 +17,13 @@
     <input id="gameSpeed" type="range" min="1" max="20" step="1" value="20" title="Game Speed" />
   </div>
   <div id='rewardTotal'></div>
+
+  <div id='turns'></div>
+  <div id='lr'></div>
+
+  <div id='turns'></div>
   <div>
-    <canvas id="canvas" width="600" height="600"></canvas>
+    <canvas id="canvas" width="1000" height="400"></canvas>
   </div>
   <!-- <div id="help">
   <pre>
@@ -39,13 +44,17 @@ Click inside this box to close it.</pre>
 <div id="agentAngle1"></div>
 <div id="agentAngle2"></div>
 </div> -->
+  W
+  <div id="weights" style="width: 90%;"></div>
+  CW
+  <div id="criticWeights" style="width: 90%;"></div>
   <!-- partial -->
   <script src='https://cdnjs.cloudflare.com/ajax/libs/jquery/2.2.2/jquery.min.js'></script>
   <script src='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js'></script>
   <script src='https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.6.1/lodash.min.js'></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="./script.js"></script>
-  
+
 </body>
 
 </html>
