@@ -8,7 +8,7 @@ function circularLoss(yTrue, yPred) {S
   return tf.losses.meanSquaredError(yTrue, yPred);
 }
 class ActorCriticModel {
-  constructor(numInputs, numActions, hiddenUnits, gamma) {
+  constructor(numInputs, numActions, hiddenUnits, gamma, batchSize) {
     this.maxMemorySize = 10000;
     this.numInputs = numInputs;
     this.numActions = numActions;
@@ -26,6 +26,8 @@ class ActorCriticModel {
     this.steps = 1000000;
     this.globalStep = 0;
     this.gamma = gamma;
+    this.batchSize= batchSize;
+    this.numOutputs = 2;
 
   }
 
@@ -53,10 +55,10 @@ class ActorCriticModel {
   }
   async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
     ++this.globalStep;
-    const statesTensor = tf.tensor(states).reshape([-1, 93]);
-    const actionsTensor = tf.tensor(actions).reshape([-1, 2]);
-    const advantagesContinuousTensor = tf.tensor(advantagesContinuous).reshape([-1, 1]);
-    const advantagesBinaryTensor = tf.tensor(advantagesBinary).reshape([-1, 1]);
+    const statesTensor = tf.tensor(states,[this.batchSize, 93]);
+    const actionsTensor = tf.tensor(actions,[this.batchSize, 2]);
+    const advantagesContinuousTensor = tf.tensor(advantagesContinuous[this.batchSize, 1]);
+    const advantagesBinaryTensor = tf.tensor(advantagesBinary[this.batchSize-1, 1]);
     await this.actor.trainOnBatch([statesTensor, actionsTensor], [advantagesContinuousTensor, advantagesBinaryTensor]);
 
     // const weights = this.actor.getWeights();
@@ -149,15 +151,16 @@ class ActorCriticModel {
       return;
     }
     sample.push([oldStates, actions, rewardSignal, states]);
+    const actorTraining =[];
     for (let [oldStates, actions, rewardSignal, states] of sample) {
       // ... rest of your code ...
-
+      
       // Add the inputs to the batch arrays
       batchStates.push(states);
       batchActions.push(actions);
     }
-    const statesTensor = tf.tensor(batchStates).reshape([-1, this.numInputs]);
-    const actionsTensor = tf.tensor(batchActions).reshape([-1, this.numActions]);
+    const statesTensor = tf.tensor(batchStates, [batchSize, this.numInputs]);
+    const actionsTensor = tf.tensor(batchActions,[batchSize, this.numActions]);
     // Predict Q-value for new state
     const [newQValue1, newQValue2] = model.predictCritic(statesTensor, actionsTensor);
     if (isNaN(newQValue1) || isNaN(newQValue2)) { console.error('newQValue1 or newQValue2 is NaN'); }
@@ -259,8 +262,8 @@ const numInputs = 93;
 //todo:// hidden to low?
 
 const numHidden = 64;
-const batchSize = 32;
-const model = new ActorCriticModel(numInputs, 2, 256, gamma);
+const batchSize = 128;
+const model = new ActorCriticModel(numInputs, 2, 256, gamma,batchSize);
 const winWidth = +$(window).width();
 const winHeight = +$(window).height();
 const maxWinSide = Math.max(winWidth, winHeight);
