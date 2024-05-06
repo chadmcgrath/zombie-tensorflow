@@ -1,5 +1,6 @@
-tf.setBackend('cpu');
-function circularLoss(yTrue, yPred) {S
+//tf.setBackend('cpu');
+function circularLoss(yTrue, yPred) {
+  S
   // Convert angles to 2D vectors
   //const yTrueVector = [tf.cos(yTrue), tf.sin(yTrue)];
   //const yPredVector = [tf.cos(yPred), tf.sin(yPred)];
@@ -26,7 +27,7 @@ class ActorCriticModel {
     this.steps = 1000000;
     this.globalStep = 0;
     this.gamma = gamma;
-    this.batchSize= batchSize;
+    this.batchSize = batchSize;
     this.numOutputs = 2;
 
   }
@@ -55,18 +56,33 @@ class ActorCriticModel {
   }
   async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
     ++this.globalStep;
-    const statesTensor = tf.tensor(states,[this.batchSize, 93]);
-    const actionsTensor = tf.tensor(actions,[this.batchSize, 2]);
-    const advantagesContinuousTensor = tf.tensor(advantagesContinuous[this.batchSize, 1]);
-    const advantagesBinaryTensor = tf.tensor(advantagesBinary[this.batchSize-1, 1]);
-    await this.actor.trainOnBatch([statesTensor, actionsTensor], [advantagesContinuousTensor, advantagesBinaryTensor]);
-
-    // const weights = this.actor.getWeights();
-    //       weights.forEach((weight, i) => {
-    //         console.log(`FITACTOR-Weight ${i}:`);
-    //         weight.print();
-    //       });
+    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
+    const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
+    const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d(advantagesContinuous.map(x => [x]));
+    const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d(advantagesBinary.map(x => [x]));
+  
+    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(advantagesContinuous), this.getNumSamples(advantagesBinary));
+    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
+    const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
+    const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
+    const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
+  
+    await this.actor.trainOnBatch([statesBatch, actionsBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
   }
+  // async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
+  //   ++this.globalStep;
+  //   const statesTensor = tf.tensor(states, [this.batchSize, 93]);
+  //   const actionsTensor = tf.tensor(actions, [this.batchSize, 2]);
+  //   const advantagesContinuousTensor = tf.tensor(advantagesContinuous[this.batchSize, 1]);
+  //   const advantagesBinaryTensor = tf.tensor(advantagesBinary[this.batchSize - 1, 1]);
+  //   await this.actor.trainOnBatch([statesTensor, actionsTensor], [advantagesContinuousTensor, advantagesBinaryTensor]);
+
+  //   // const weights = this.actor.getWeights();
+  //   //       weights.forEach((weight, i) => {
+  //   //         console.log(`FITACTOR-Weight ${i}:`);
+  //   //         weight.print();
+  //   //       });
+  // }
   createCriticModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
@@ -82,14 +98,70 @@ class ActorCriticModel {
 
     return model;
   }
-
-  async fitCritic([states, actions], [q1, q2]) {
-    const statesTensor = tf.tensor(states).reshape([-1, 93]);
-    const actionsTensor = tf.tensor(actions).reshape([-1, 2]);
-    const q1Tensor = tf.tensor(q1).reshape([-1, 1]);
-    const q2Tensor = tf.tensor(q2).reshape([-1, 1]);
-    await this.critic.trainOnBatch([statesTensor, actionsTensor], [q1Tensor, q2Tensor]);
+  predictCritic(states, actions) {  
+    return tf.tidy(() => {
+      const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
+      const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
+      const criticOutput = this.critic.predict([statesTensor, actionsTensor]);
+      if (Array.isArray(criticOutput) && criticOutput.length === 2) {
+        const [criticOutput1, criticOutput2] = criticOutput;
+        return [criticOutput1, criticOutput2];
+      } else {
+        console.error('critic model output is not an array of length 2');
+      }
+    });
   }
+  getNumSamples(data) {
+    if (data instanceof tf.Tensor) {
+      return data.shape[0];
+    } else if (Array.isArray(data)) {
+      return data.length;
+    }
+  }
+  
+  async fitCritic([states, actions], [q1, q2]) {
+    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
+    const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
+    const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
+    const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
+  
+    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(q1), this.getNumSamples(q2));
+    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
+    const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
+    const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
+    const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
+  
+    await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
+  }
+  // async fitCritic([states, actions], [q1, q2]) {
+  //   const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
+  //   const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
+  //   const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
+  //   const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
+  
+  //   const numSamples = Math.min(statesTensor.shape[0], actionsTensor.shape[0], q1Tensor.shape[0], q2Tensor.shape[0]);
+  //   const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
+  //   const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
+  //   const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
+  //   const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
+  
+  //   await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
+  // }
+  
+  // async fitCritic([states, actions], [q1, q2]) {
+  //   const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
+  //   const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
+  //   const q1Tensor = q1 instanceof tf.Tensor ? q1.reshape([-1, 1]) : tf.tensor(q1);
+  //   const q2Tensor = q2 instanceof tf.Tensor ? q2.reshape([-1, 1]) : tf.tensor(q2);
+  //   await this.critic.trainOnBatch([statesTensor, actionsTensor], [q1Tensor, q2Tensor]);
+  // }
+  // async fitCritic([states, actions], [q1, q2]) {
+  //   const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
+  //     const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
+  //   const q1Tensor =  Array.isArray(q1)? tf.tensor(q1) : q1;  // Convert to array of arrays
+  //   const q2Tensor = Array.isArray(q2)? tf.tensor(q2) : q2; 
+  //   await this.critic.trainOnBatch([statesTensor, actionsTensor], [q1Tensor, q2Tensor]);
+  // }
   remember(state, action, reward, nextState, error) {
     if (this.memory.length >= this.maxMemorySize) {
       this.memory.shift();
@@ -128,59 +200,87 @@ class ActorCriticModel {
     return batch;
   }
 
-  async train(oldStates, actions, rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize) {
+  async train(oldStates, actions, rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize, isTrain) {
     if (states.length < 1) {
       console.error('states in train length is less than 1');
       return;
     }
-    const model = this;
-    const sample = model.sample(batchSize - 1);
-    const batchStates = [];
-    const batchActions = [];
-
-
-
-    let tdError;
-    if (isNaN(tdError || states.length < 1)) {
-      console.error('TD Error is NaN' + 'rs' + rewardSignal + 'gamma' + this.gamma * 'qvalnext' + qValueNextState + 'qvalcurr' + qValueCurrent);
-      console.error('oldQValueContinuous' + oldQValueContinuous + 'oldQValueBinary' + oldQValueBinary);
-      console.error('newQValue1' + newQValue1 + 'newQValue2' + newQValue2);
-      console.error('states' + states + 'actions' + actions);
-      console.error('oldStates' + oldStates);
-      console.log('total turns' + totalTurns);
+    // do not process, return if not training
+    if(!isTrain){
+      this.memory.push([oldStates, actions, rewardSignal, states, .5]);
       return;
     }
+    const model = this;
+
+    
+    const sample = model.sample(batchSize - 1);
+
+    if (states.length < 1) {
+      console.log('rs' + rewardSignal + 'gamma' + this.gamma * 'qvalnext' + qValueNextState + 'qvalcurr' + qValueCurrent);
+      console.log('oldQValueContinuous' + oldQValueContinuous + 'oldQValueBinary' + oldQValueBinary);
+      console.log('newQValue1' + newQValue1 + 'newQValue2' + newQValue2);
+      console.log('states' + states + 'actions' + actions);
+      console.log('oldStates' + oldStates);
+      console.error('total turns' + totalTurns);
+      return;
+    }
+
     sample.push([oldStates, actions, rewardSignal, states]);
-    const actorTraining =[];
+
+    // Prepare batch data
+    let batchOldStates = [];
+    let batchActions = [];
+    let batchRewardSignals = [];
+    let batchNewStates = [];
+
     for (let [oldStates, actions, rewardSignal, states] of sample) {
-      // ... rest of your code ...
-      
-      // Add the inputs to the batch arrays
-      batchStates.push(states);
+      batchOldStates.push(oldStates);
       batchActions.push(actions);
+      batchRewardSignals.push(rewardSignal);
+      batchNewStates.push(states);
     }
-    const statesTensor = tf.tensor(batchStates, [batchSize, this.numInputs]);
-    const actionsTensor = tf.tensor(batchActions,[batchSize, this.numActions]);
-    // Predict Q-value for new state
-    const [newQValue1, newQValue2] = model.predictCritic(statesTensor, actionsTensor);
-    if (isNaN(newQValue1) || isNaN(newQValue2)) { console.error('newQValue1 or newQValue2 is NaN'); }
-    for (let [oldStates, actions, rewardSignal, states] of sample) {
-      // Compute target Q-values
-      const targetQValue1 = rewardSignal + this.gamma * newQValue1;
-      const targetQValue2 = rewardSignal + this.gamma * newQValue2;
 
-      // Update critic model
-      await model.fitCritic([states, actions], [targetQValue1, targetQValue2]);
-      // Update actor model
-      const advantageContinuous = targetQValue1 - newQValue1;
-      const advantageBinary = targetQValue2 - newQValue2;
-      await model.fitActor(oldStates, actions, advantageContinuous, advantageBinary);
+    // Convert to tensors
+    const oldStatesTensor = tf.tensor(batchOldStates);
+    const actionsTensor = tf.tensor(batchActions);
+    const rewardSignalsTensor = tf.tensor(batchRewardSignals);
+    const newStatesTensor = tf.tensor(batchNewStates);
 
-      const qValueNextState = (newQValue1 + newQValue2) / 2;
-      const qValueCurrent = (oldQValueContinuous, oldQValueBinary) / 2;
-      tdError = rewardSignal + this.gamma * qValueNextState - qValueCurrent;
+    // Predict Q-values for new states
+    const [newQValue1, newQValue2] = model.predictCritic(newStatesTensor, actionsTensor);
+    // if (newQValue1.some(isNaN) || newQValue2.some(isNaN)) {
+    //   console.error('newQValue1 or newQValue2 contains NaN');
+    // }
+
+    // Compute target Q-values
+    const targetQValue1 = rewardSignalsTensor.add(newQValue1.mul(this.gamma));
+    const targetQValue2 = rewardSignalsTensor.add(newQValue2.mul(this.gamma));
+
+    // Update critic model
+    await model.fitCritic([newStatesTensor, actionsTensor], [targetQValue1, targetQValue2]);
+
+    // Update actor model
+    const advantageContinuous = targetQValue1.sub(newQValue1);
+    const advantageBinary = targetQValue2.sub(newQValue2);
+    await model.fitActor(oldStatesTensor, actionsTensor, advantageContinuous, advantageBinary);
+
+    // Compute TD errors for each experience in the batch
+    const qValueNextState = newQValue1.add(newQValue2).div(tf.scalar(2));
+    // why are we adding these?
+    const qValueCurrent = oldQValueContinuous.add(oldQValueBinary).div(tf.scalar(2));
+    const tdErrors = rewardSignalsTensor.add(qValueNextState.mul(this.gamma)).sub(qValueCurrent);
+
+    for (let i = 0; i < sample.length; i++) {
+      const tdError = tdErrors[i];
+
+      // Update tdError for existing experience
+      if (this.memory[i]) {
+        this.memory[i][4] = tdError;
+      } else {
+        // Add new experience
+        this.memory.push([...sample[i], tdError]);
+      }
     }
-    model.remember(oldStates, actions, rewardSignal, states, tdError)
   }
   getWeightCollection(w) {
     const ret = [];
@@ -189,27 +289,7 @@ class ActorCriticModel {
     });
     return ret;
   }
-  predictCritic(states, actions) {
-    let statesTensor = states;
-    let actionsTensor = actions;
-    return tf.tidy(() => {
-      if (!(states instanceof tf.Tensor))
-        statesTensor = tf.tensor(states);
-      if (!(actions instanceof tf.Tensor))
-        actionsTensor = tf.tensor(actions);
-      statesTensor = statesTensor.reshape([-1, 93]);
-      actionsTensor = actionsTensor.reshape([-1, 2]);
-      const criticOutput = this.critic.predict([statesTensor, actionsTensor]);
-      if (Array.isArray(criticOutput) && criticOutput.length === 2) {
-        const [criticOutput1, criticOutput2] = criticOutput;
-        const criticOutput1Value = criticOutput1.dataSync()[0];
-        const criticOutput2Value = criticOutput2.dataSync()[0];
-        return [criticOutput1Value, criticOutput2Value];
-      } else {
-        console.error('critic model output is not an array of length 2');
-      }
-    });
-  }
+
   predictActor(states, actions) {
     let statesTensor = states;
     let actionsTensor = actions;
@@ -223,18 +303,18 @@ class ActorCriticModel {
 
       if (Array.isArray(actorOutput) && actorOutput.length === 2) {
         const [continuousActionTensor, binaryActionTensor] = actorOutput;
-        const continuousAction = continuousActionTensor.dataSync()[0];
-        const binaryAction = binaryActionTensor.dataSync()[0];
-        if (isNaN(continuousAction) || isNaN(binaryAction)) {
-          const weights = this.actor.getWeights();
-          weights.forEach((weight, i) => {
-            console.log(`PREDICT-Weight ${i}:`);
-            weight.print();
-          });
-          console.error('continuousAction or binaryAction is NaN');
+        //const continuousAction = continuousActionTensor.dataSync()[0];
+        //const binaryAction = binaryActionTensor.dataSync()[0];
+        // if (isNaN(continuousAction) || isNaN(binaryAction)) {
+        //   const weights = this.actor.getWeights();
+        //   weights.forEach((weight, i) => {
+        //     console.log(`PREDICT-Weight ${i}:`);
+        //     weight.print();
+        //   });
+        //   console.error('continuousAction or binaryAction is NaN');
 
-        }
-        return [continuousAction, binaryAction];
+        // }
+        return [continuousActionTensor, binaryActionTensor];
       } else {
         console.error('Actor model output is not an array of length 2');
       }
@@ -263,7 +343,7 @@ const numInputs = 93;
 
 const numHidden = 64;
 const batchSize = 128;
-const model = new ActorCriticModel(numInputs, 2, 256, gamma,batchSize);
+const model = new ActorCriticModel(numInputs, 2, 256, gamma, batchSize);
 const winWidth = +$(window).width();
 const winHeight = +$(window).height();
 const maxWinSide = Math.max(winWidth, winHeight);
@@ -978,11 +1058,9 @@ Agent.prototype.logic = async function (ctx, clock) {
       states.push(...this.getVision());
       states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
     }
-    [continuousAction, binaryAction] = model.predictActor(states, actions);
-    [oldQValueContinuous, oldQValueBinary] = model.predictCritic(states, actions);
-    if (isNaN(continuousAction) || isNaN(binaryAction) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary)) {
-      console.error('NaN detected in isNaN(continuousAction) || isNaN(binaryAction) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary)');
-    }
+    [continuousAction, binaryAction] = model.predictActor([states], [actions]);
+    [oldQValueContinuous, oldQValueBinary] = model.predictCritic([states], [actions]);
+    
     // Perform action and get new state and reward
 
     oldStates = [...states];
@@ -1002,10 +1080,12 @@ Agent.prototype.logic = async function (ctx, clock) {
       actions.push(Math.atan2(this.newDir.x, this.newDir.y), rndMove);
     } else {
 
-      actions.push(continuousAction, binaryAction);
+      const continuousActionVal= continuousAction.dataSync()[0];
+      const binarayActionVal=binaryAction.dataSync()[0];
+      actions.push(continuousActionVal, binarayActionVal);
       //choose current action, [rotate, move or shoot]        
       // -pi to pi
-      const newAngle = continuousAction * Math.PI;
+      const newAngle = continuousActionVal * Math.PI;
       isMoving = binaryAction >= .5;
       this.newDir = { x: Math.cos(newAngle), y: Math.sin(newAngle) };
     }
@@ -1089,12 +1169,12 @@ Agent.prototype.logic = async function (ctx, clock) {
 
   if (this.isHuman === true && states.length > 0) {
 
-    if (isNaN(this.rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary) || states.length < 1 || actions.length < 1) {
-      console.error('NaN detected IN isNaN(rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary || states.length <1 || actions.length<1');
-    }
-    else {
-      await model.train(oldStates, actions, this.rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize);
-    }
+    // if (isNaN(this.rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary) || states.length < 1 || actions.length < 1) {
+    //   console.error('NaN detected IN isNaN(rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary || states.length <1 || actions.length<1');
+    // }
+
+    await model.train(oldStates, actions, this.rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize, totalTurns % batchSize === 0);
+    
     totalRewards += this.rewardSignal;
     $("#rewardTotal").text(totalRewards);
     this.rewardSignal = 0;
