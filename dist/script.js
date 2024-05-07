@@ -1,6 +1,6 @@
 //tf.setBackend('cpu');
 function circularLoss(yTrue, yPred) {
-  S
+  
   // Convert angles to 2D vectors
   //const yTrueVector = [tf.cos(yTrue), tf.sin(yTrue)];
   //const yPredVector = [tf.cos(yPred), tf.sin(yPred)];
@@ -37,21 +37,18 @@ class ActorCriticModel {
   }
   createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
-    const actionInput = tf.input({ shape: [this.numActions] });
-
+  
     const hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(stateInput);
-
+  
     // Separate output layers for each action
     const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh' }).apply(hidden);  // Q-value for continuous action
     const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid' }).apply(hidden);  // Q-value for binary action
-
-    //const output = tf.layers.concatenate().apply([continuousAction, binaryAction]);
-
-    const model = tf.model({ inputs: [stateInput, actionInput], outputs: [continuousAction, binaryAction] });
-
+  
+    const model = tf.model({ inputs: stateInput, outputs: [continuousAction, binaryAction] });
+  
     const optimizer = tf.train.adam(this.initialLearningRate);
     model.compile({ optimizer: optimizer, loss: ['meanSquaredError', 'binaryCrossentropy'] });
-
+  
     return model;
   }
   async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
@@ -67,22 +64,9 @@ class ActorCriticModel {
     const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
     const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
 
-    await this.actor.trainOnBatch([statesBatch, actionsBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
+    await this.actor.trainOnBatch([statesBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
   }
-  // async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
-  //   ++this.globalStep;
-  //   const statesTensor = tf.tensor(states, [this.batchSize, 93]);
-  //   const actionsTensor = tf.tensor(actions, [this.batchSize, 2]);
-  //   const advantagesContinuousTensor = tf.tensor(advantagesContinuous[this.batchSize, 1]);
-  //   const advantagesBinaryTensor = tf.tensor(advantagesBinary[this.batchSize - 1, 1]);
-  //   await this.actor.trainOnBatch([statesTensor, actionsTensor], [advantagesContinuousTensor, advantagesBinaryTensor]);
 
-  //   // const weights = this.actor.getWeights();
-  //   //       weights.forEach((weight, i) => {
-  //   //         console.log(`FITACTOR-Weight ${i}:`);
-  //   //         weight.print();
-  //   //       });
-  // }
   createCriticModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
@@ -133,43 +117,16 @@ class ActorCriticModel {
 
     await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
   }
-  // async fitCritic([states, actions], [q1, q2]) {
-  //   const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
-  //   const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
-  //   const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
-  //   const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
-
-  //   const numSamples = Math.min(statesTensor.shape[0], actionsTensor.shape[0], q1Tensor.shape[0], q2Tensor.shape[0]);
-  //   const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
-  //   const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
-  //   const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
-  //   const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
-
-  //   await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
-  // }
-
-  // async fitCritic([states, actions], [q1, q2]) {
-  //   const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
-  //   const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
-  //   const q1Tensor = q1 instanceof tf.Tensor ? q1.reshape([-1, 1]) : tf.tensor(q1);
-  //   const q2Tensor = q2 instanceof tf.Tensor ? q2.reshape([-1, 1]) : tf.tensor(q2);
-  //   await this.critic.trainOnBatch([statesTensor, actionsTensor], [q1Tensor, q2Tensor]);
-  // }
-  // async fitCritic([states, actions], [q1, q2]) {
-  //   const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
-  //     const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
-  //   const q1Tensor =  Array.isArray(q1)? tf.tensor(q1) : q1;  // Convert to array of arrays
-  //   const q2Tensor = Array.isArray(q2)? tf.tensor(q2) : q2; 
-  //   await this.critic.trainOnBatch([statesTensor, actionsTensor], [q1Tensor, q2Tensor]);
-  // }
-  remember(state, action, reward, nextState, error) {
+  
+  remember([state, oldActions, reward, nextState, action, tdError]) {
     if (this.memory.length >= this.maxMemorySize) {
       this.memory.shift();
       this.priorities.shift();
-    }
-    this.memory.push([state, action, reward, nextState]);
-    const priority = Math.pow(Math.abs(error) + 1e-6, this.alpha);  // Prioritize experiences with higher error
-    if (isNaN(error) || isNaN(priority))
+    } 
+    const tdErrorValue= isNaN(tdError) ? tdError.dataSync()[0] : tdError;
+    this.memory.push([state, oldActions, reward, nextState, action, tdErrorValue]);
+    const priority = Math.pow(Math.abs(tdErrorValue) + 1e-6, this.alpha);  // Prioritize experiences with higher error
+    if (isNaN(tdErrorValue) || isNaN(priority))
       console.error('Error or priority is NaN');
     else
       this.priorities.push(priority);  // Prioritize experiences with higher error
@@ -186,6 +143,7 @@ class ActorCriticModel {
     }
 
     const batch = [];
+    const indices = [];
     for (let i = 0; i < batchSize; i++) {
       const rand = Math.random() * prioritiesSum;
       let cumulativeSum = 0;
@@ -193,27 +151,28 @@ class ActorCriticModel {
         cumulativeSum += this.priorities[j];
         if (cumulativeSum > rand) {
           batch.push(this.memory[j]);
+          indices.push(j);
           break;
         }
       }
     }
-    return batch;
+    return [batch, indices];
   }
 
-  async train(oldStates, actions, rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize, isTrain) {
+  async train(oldStates, oldActions, rewardSignal, states, actions, batchSize, isTrain) {
     if (states.length < 1) {
       console.error('states in train length is less than 1');
       return;
     }
     // do not process, return if not training
     if (!isTrain) {
-      this.memory.push([oldStates, actions, rewardSignal, states, .5]);
+      this.remember([oldStates, oldActions, rewardSignal, states, actions, .5]);
       return;
     }
     const model = this;
 
 
-    const sample = model.sample(batchSize - 1);
+    const [sample, sampleIndices] = model.sample(batchSize - 1);
 
     if (states.length < 1) {
       console.log('rs' + rewardSignal + 'gamma' + this.gamma * 'qvalnext' + qValueNextState + 'qvalcurr' + qValueCurrent);
@@ -225,27 +184,30 @@ class ActorCriticModel {
       return;
     }
 
-    sample.push([oldStates, actions, rewardSignal, states]);
+    sample.push([oldStates, oldActions, rewardSignal, states, actions, .5]);
 
     // Prepare batch data
     let batchOldStates = [];
     let batchActions = [];
     let batchRewardSignals = [];
     let batchNewStates = [];
+    let batchOldActions = [];
 
-    for (let [oldStates, actions, rewardSignal, states] of sample) {
+    for (let [oldStates, oldActions, rewardSignal, states, actions] of sample) {
       batchOldStates.push(oldStates);
       batchActions.push(actions);
       batchRewardSignals.push(rewardSignal);
       batchNewStates.push(states);
+      batchOldActions.push(oldActions);
     }
 
     // Convert to tensors
     const oldStatesTensor = tf.tensor(batchOldStates);
+    const oldActionsTensor = tf.tensor(batchOldActions);
     const actionsTensor = tf.tensor(batchActions);
     const rewardSignalsTensor = tf.tensor(batchRewardSignals);
     const newStatesTensor = tf.tensor(batchNewStates);
-
+    const [oldQValueContinuous, oldQValueBinary] = model.predictCritic(oldStatesTensor, oldActionsTensor);
     // Predict Q-values for new states
     const [newQValue1, newQValue2] = model.predictCritic(newStatesTensor, actionsTensor);
     // if (newQValue1.some(isNaN) || newQValue2.some(isNaN)) {
@@ -265,20 +227,20 @@ class ActorCriticModel {
     await model.fitActor(oldStatesTensor, actionsTensor, advantageContinuous, advantageBinary);
 
     // Compute TD errors for each experience in the batch
-    const qValueNextState = newQValue1.add(newQValue2).div(tf.scalar(2));
+    const qValueNextState = newQValue1.add(newQValue2).div(tf.scalar(2)).reshape([this.batchSize]);
     // why are we adding these?
-    const qValueCurrent = oldQValueContinuous.add(oldQValueBinary).div(tf.scalar(2));
+    const qValueCurrent = oldQValueContinuous.add(oldQValueBinary).div(tf.scalar(2)).reshape([this.batchSize]);
     const tdErrors = rewardSignalsTensor.add(qValueNextState.mul(this.gamma)).sub(qValueCurrent);
-
+    const tdErrorsArray = tdErrors.dataSync();
     for (let i = 0; i < sample.length; i++) {
-      const tdError = tdErrors[i];
+      const tdError = tdErrorsArray[i];
 
       // Update tdError for existing experience
-      if (this.memory[i]) {
-        this.memory[i][4] = tdError;
+      if (this.memory[sampleIndices[i]]) {
+        this.memory[sampleIndices[i]][5] = tdError;
       } else {
         // Add new experience
-        this.memory.push([...sample[i], tdError]);
+        this.remember([...sample[i], tdError]);
       }
     }
   }
@@ -299,7 +261,7 @@ class ActorCriticModel {
       if (!(actions instanceof tf.Tensor))
         actionsTensor = tf.tensor(actions).reshape([-1, 2]);
 
-      const actorOutput = this.actor.predict([statesTensor, actionsTensor]);
+      const actorOutput = this.actor.predict([statesTensor]);
 
       if (Array.isArray(actorOutput) && actorOutput.length === 2) {
         const [continuousActionTensor, binaryActionTensor] = actorOutput;
@@ -330,6 +292,7 @@ let oldStates = []
 let actions = [0, 0];
 let rewards = [];
 let totalRewards = 0;
+let rewardOverTime=[];
 let wallHitReward = 0;
 let baddyHitReward = 0;
 let totalTurns = 0;
@@ -1098,7 +1061,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       }
     }
   }   // for i in seen
-  let continuousAction, binaryAction, oldQValueContinuous, oldQValueBinary;
+  let continuousAction, binaryAction, oldActions;
   if (this.isHuman) {
     this.state = 'panic';
     this.nextTimer = 5;
@@ -1110,16 +1073,15 @@ Agent.prototype.logic = async function (ctx, clock) {
       states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
     }
     [continuousAction, binaryAction] = model.predictActor([states], [actions]);
-    [oldQValueContinuous, oldQValueBinary] = model.predictCritic([states], [actions]);
+
 
     // Perform action and get new state and reward
-
+    oldActions = [...actions];
     oldStates = [...states];
     states = [];
     states.push(...this.getVision());
     states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
 
-    this.rewardSignal = 0;
     let epsilon = .15;
 
     actions = [];
@@ -1224,9 +1186,10 @@ Agent.prototype.logic = async function (ctx, clock) {
     //   console.error('NaN detected IN isNaN(rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary || states.length <1 || actions.length<1');
     // }
 
-    await model.train(oldStates, actions, this.rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize, totalTurns % batchSize === 0);
+    await model.train(oldStates, oldActions, this.rewardSignal, states,actions, batchSize, totalTurns % batchSize === 0);
 
     totalRewards += this.rewardSignal;
+    rewardOverTime.push(totalRewards);
     $("#rewardTotal").text(totalRewards);
     this.rewardSignal = 0;
   }
@@ -1249,6 +1212,7 @@ Agent.prototype.shoot = (agent, seen) => {
   });
 
   ctx.beginPath();
+  ctx.lineWidth = 3;
   ctx.arc(agent.pos.x, agent.pos.y, 5, 0, 2 * Math.PI, false);
   ctx.fillStyle = 'red';
   ctx.fill();
@@ -1269,10 +1233,11 @@ Agent.prototype.shoot = (agent, seen) => {
   // Draw red line to the closest baddy
   // todo: keep it alive on canvas
   ctx.beginPath();
+  ctx.lineWidth = 3;
   ctx.strokeStyle = 'red';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
-    agent.rewardSignal += .8;
+    agent.rewardSignal += .4;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
     if (closestBaddy.currentHp < 1)
@@ -1303,13 +1268,13 @@ Agent.prototype.draw = function (ctx) {
   ctx.arc(this.pos.x, this.pos.y, 5, 0, pi2, false);
   ctx.fillStyle = this.getColor();
   ctx.fill();
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 2;
   ctx.strokeStyle = '#FFFFFF';
   ctx.stroke();
   if (this.ring) {
     ctx.beginPath();
     ctx.arc(this.pos.x, this.pos.y, this.ring, 0, pi2, false);
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 2;
     ctx.strokeStyle = '#FF0000';
     ctx.stroke();
   }
@@ -1466,6 +1431,26 @@ window.addEventListener('keydown', (event) => {
 //   fpsc = 0;
 // }, 1000);
 $(function () {
+  let ctx = document.getElementById('rewardOverTimeChart').getContext('2d');
+  let chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: rewardOverTime.map((_, i) => i), // X-axis labels are just indices
+        datasets: [{
+            label: 'Reward over time',
+            data: rewardOverTime,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            fill: false
+        }]
+    },
+    options: {
+        scales: {
+            y: {
+                beginAtZero: true
+            }
+        }
+    }
+});
   $('#gameSpeed').change(function () {
     gameSpeed = $(this).val();
   }).val(gameSpeed);
