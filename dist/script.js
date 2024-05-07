@@ -60,13 +60,13 @@ class ActorCriticModel {
     const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
     const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d(advantagesContinuous.map(x => [x]));
     const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d(advantagesBinary.map(x => [x]));
-  
+
     const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(advantagesContinuous), this.getNumSamples(advantagesBinary));
     const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
     const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
     const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
     const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
-  
+
     await this.actor.trainOnBatch([statesBatch, actionsBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
   }
   // async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
@@ -98,10 +98,10 @@ class ActorCriticModel {
 
     return model;
   }
-  predictCritic(states, actions) {  
+  predictCritic(states, actions) {
     return tf.tidy(() => {
-      const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
-      const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
+      const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [Math.min(batchSize, states.length), states[0].length]) : states;
+      const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [Math.min(batchSize, states.length), actions[0].length]) : actions;
       const criticOutput = this.critic.predict([statesTensor, actionsTensor]);
       if (Array.isArray(criticOutput) && criticOutput.length === 2) {
         const [criticOutput1, criticOutput2] = criticOutput;
@@ -118,19 +118,19 @@ class ActorCriticModel {
       return data.length;
     }
   }
-  
+
   async fitCritic([states, actions], [q1, q2]) {
     const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
     const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
     const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
     const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
-  
+
     const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(q1), this.getNumSamples(q2));
     const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
     const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
     const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
     const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
-  
+
     await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
   }
   // async fitCritic([states, actions], [q1, q2]) {
@@ -138,16 +138,16 @@ class ActorCriticModel {
   //   const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
   //   const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
   //   const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
-  
+
   //   const numSamples = Math.min(statesTensor.shape[0], actionsTensor.shape[0], q1Tensor.shape[0], q2Tensor.shape[0]);
   //   const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
   //   const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
   //   const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
   //   const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
-  
+
   //   await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
   // }
-  
+
   // async fitCritic([states, actions], [q1, q2]) {
   //   const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [ Math.min(batchSize, states.length), states[0].length]) : states;
   //   const actionsTensor = Array.isArray(actions) ? tf.tensor2d(actions).slice([0, 0], [ Math.min(batchSize, states.length), actions[0].length]) : actions;
@@ -206,13 +206,13 @@ class ActorCriticModel {
       return;
     }
     // do not process, return if not training
-    if(!isTrain){
+    if (!isTrain) {
       this.memory.push([oldStates, actions, rewardSignal, states, .5]);
       return;
     }
     const model = this;
 
-    
+
     const sample = model.sample(batchSize - 1);
 
     if (states.length < 1) {
@@ -335,15 +335,15 @@ let baddyHitReward = 0;
 let totalTurns = 0;
 
 // Hyperparameters
-const numEpisodes = 10000;
+const numEpisodes = 5000;
 const gamma = 0.95;  // Discount factor
 const numActions = 2;
 const numInputs = 93;
 //todo:// hidden to low?
 
 const numHidden = 64;
-const batchSize = 128;
-const model = new ActorCriticModel(numInputs, 2, 256, gamma, batchSize);
+const batchSize = 512;
+const model = new ActorCriticModel(numInputs, 2, 128, gamma, batchSize);
 const winWidth = +$(window).width();
 const winHeight = +$(window).height();
 const maxWinSide = Math.max(winWidth, winHeight);
@@ -666,14 +666,22 @@ function lineIntersectsSquare(lineStart, lineEnd, square) {
 
   let sides = [[topLeft, topRight], [topRight, bottomRight], [bottomRight, bottomLeft], [bottomLeft, topLeft]];
 
+  let closestIntersection = null;
+  let minDistance = Infinity;
+
   for (let side of sides) {
     let intersection = line_intersect(lineStart, lineEnd, side[0], side[1]);
     if (intersection) {
-      return intersection;
+      let dx = lineStart.x - intersection.up.x;
+      let dy = lineStart.y - intersection.up.y;
+      let distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestIntersection = intersection;
+      }
     }
   }
-
-  return false;
+  return closestIntersection ? { ...closestIntersection, distance: minDistance } : false;
 }
 //karpathy collision code- psoibly replace with rayIntersect
 // this doesn't handle buildings properly cuz the origina code din't need to.
@@ -682,20 +690,21 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
   const p1 = agent.p;
   // collide with walls
   if (check_walls) {
-    const windowWalls = [
-      { bounds: { x: 0, y: 0, width: window.innerWidth, height: 0 } }, // top
-      { bounds: { x: window.innerWidth, y: window.innerHeight, width: window.innerWidth, height: 0 } }, // bottom
-      //{ bounds: { x: 0, y: 0, width: 0, height: window.innerHeight }} , // left
-      //{ bounds: { x: window.innerWidth, y: 0, width: 0, height: window.innerHeight }} // right
-    ];
-    const windowWallsXY = { bounds: windowWalls.map(wall => [wall.bounds.x, wall.bounds.y]) }
+    const windowWalls = {
+      bounds: [{ x: 0, y: 0, width: window.innerWidth, height: 0 }, // top
+      // { bounds: { x: 0, y: window.innerHeight, width: window.innerWidth, height: 0 } }, // bottom
+      // { bounds: { x: 0, y: 0, width: 0, height: window.innerHeight }}, // left
+      { x: window.innerWidth, y: 0, width: 0, height: window.innerHeight }]
+    }; // right
+
+    //const windowWallsXY = { bounds: windowWalls.map(wall => {wall.bounds.x, wall.bounds.y}) }
     // const windowWalls = [
     //   { bounds: { x: 0, y: 0, width: window.innerWidth, height: 0 }} , // top
     //   { bounds: { x: 0, y: window.innerHeight, width: window.innerWidth, height: 0 }} , // bottom
     //   { bounds: { x: 0, y: 0, width: 0, height: window.innerHeight }} , // left
     //   { bounds: { x: window.innerWidth, y: 0, width: 0, height: window.innerHeight }} // right
     // ];
-    const allWalls = blocks;//.concat(windowWallsXY);
+    const allWalls = blocks.concat(windowWalls);
 
     for (var i = 0, n = allWalls.length; i < n; i++) {
       var wall = allWalls[i];
@@ -703,15 +712,32 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
       let res = lineIntersectsSquare(p1, p2, wall);
       if (res) {
         res.type = -.1; // is wall
+        // Calculate the distance from p1 to the intersection point
+        let dx = p1.x - res.up.x;
+        let dy = p1.y - res.up.y;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        res.distance = distance;
+
         if (!minres) { minres = res; }
         else {
-          // check if its closer
-          if (res.ua < minres.ua) {
-            // if yes replace it
+          // Check if it's closer
+          if (res.distance < minres.distance) {
+            // If yes, replace it
             minres = res;
           }
         }
       }
+      // if (res) {
+      //   res.type = -.1; // is wall
+      //   if (!minres) { minres = res; }
+      //   else {
+      //     // check if its closer
+      //     if (res.ua < minres.ua) {
+      //       // if yes replace it
+      //       minres = res;
+      //     }
+      //   }
+      // }
     }
   }
 
@@ -768,11 +794,7 @@ function Agent(config) {
     y: 0
   };
 
-
-
   this.rad = 10;
-
-
   this.speed = config.speed || this.type === 'human' ? 2 + Math.random() : 1 + Math.random();
   this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
   this.dir = randomAngle();
@@ -794,7 +816,7 @@ function Agent(config) {
   this.v = new Vec(0, 0);
   //
   this.state = config.state || 'idle';
-  this.viewDist = config.viewDist || 100;
+  this.viewDist = config.viewDist || 1000;
   this.viewFov = (config.viewFov || this.type === 'human' ? 90 : 45) * oneRad;
   this.viewFovD2 = this.viewFov / 2;
   this.nextTimer = Math.random() * 10;
@@ -929,15 +951,18 @@ Agent.prototype.see = function () {
     }
     if (good) {
       const angle = normalize(sub(a.pos, this.pos))
-      viewBlocked = false;
+      let viewBlocked = false;
       for (var wi = 0, wl = blocks.length; wi < wl; wi++) {
-        // todo: why was this only = not ==
-        if (walls = blocks[wi].rayIntersect(a.pos, angle)) {
-          if (walls[0].dist > 0 && walls[0].dist < d) {
-            viewBlocked = true;
-            break;
+        let walls = blocks[wi].rayIntersect(this.pos, angle);
+        if (walls) {
+          for (let wall of walls) {
+            if (wall.dist > 0 && wall.dist < d) {
+              viewBlocked = true;
+              break;
+            }
           }
         }
+        if (viewBlocked) break;
       }
       if (!viewBlocked)
         seen.push({
@@ -946,6 +971,25 @@ Agent.prototype.see = function () {
           angle: angle
         });
     }
+    // if (good) {
+    //   const angle = normalize(sub(a.pos, this.pos))
+    //   viewBlocked = false;
+    //   for (var wi = 0, wl = blocks.length; wi < wl; wi++) {
+    //     // todo: why was this only = not ==
+    //     if (walls = blocks[wi].rayIntersect(a.pos, angle)) {
+    //       if (walls && walls[0].dist > 0 && walls[0].dist < d) {
+    //         viewBlocked = true;
+    //         break;
+    //       }
+    //     }
+    //   }
+    //   if (!viewBlocked)
+    //     seen.push({
+    //       agent: a,
+    //       dist: d,
+    //       angle: angle
+    //     });
+    // }
   }
 
   if (seen.length > 1) seen.sort(function (a, b) {
@@ -1032,7 +1076,14 @@ Agent.prototype.logic = async function (ctx, clock) {
 
 
     if (this.type === 'zombie') {
-      if (!seen) continue;
+      if (!seen) {
+
+        this.nextTimer = 3 + Math.random() * 10;
+        this.newDir = randomAngle();
+        this.state = 'idle';
+        //continue;
+
+      }
       // attack human
       if (agentType === 'human') {
         this.state = 'attack';
@@ -1060,7 +1111,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     }
     [continuousAction, binaryAction] = model.predictActor([states], [actions]);
     [oldQValueContinuous, oldQValueBinary] = model.predictCritic([states], [actions]);
-    
+
     // Perform action and get new state and reward
 
     oldStates = [...states];
@@ -1080,8 +1131,8 @@ Agent.prototype.logic = async function (ctx, clock) {
       actions.push(Math.atan2(this.newDir.x, this.newDir.y), rndMove);
     } else {
 
-      const continuousActionVal= continuousAction.dataSync()[0];
-      const binarayActionVal=binaryAction.dataSync()[0];
+      const continuousActionVal = continuousAction.dataSync()[0];
+      const binarayActionVal = binaryAction.dataSync()[0];
       actions.push(continuousActionVal, binarayActionVal);
       //choose current action, [rotate, move or shoot]        
       // -pi to pi
@@ -1100,7 +1151,7 @@ Agent.prototype.logic = async function (ctx, clock) {
   this.nextTimer -= clock.delta;
   //zombies when timer runs out go back to random wandering
   if (this.isHuman === false && this.nextTimer <= 0) {
-    this.nextTimer = 3 + Math.random() * 10;
+    this.nextTimer = 3 + Math.random() * 3;
     this.newDir = randomAngle();
     this.state = 'idle';
   }
@@ -1174,7 +1225,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     // }
 
     await model.train(oldStates, actions, this.rewardSignal, states, oldQValueContinuous, oldQValueBinary, batchSize, totalTurns % batchSize === 0);
-    
+
     totalRewards += this.rewardSignal;
     $("#rewardTotal").text(totalRewards);
     this.rewardSignal = 0;
@@ -1199,7 +1250,7 @@ Agent.prototype.shoot = (agent, seen) => {
 
   ctx.beginPath();
   ctx.arc(agent.pos.x, agent.pos.y, 5, 0, 2 * Math.PI, false);
-  ctx.fillStyle = agent.getColor();
+  ctx.fillStyle = 'red';
   ctx.fill();
 
   // Find the closest baddy
@@ -1215,10 +1266,10 @@ Agent.prototype.shoot = (agent, seen) => {
     }
   });
 
-  // Draw orange line to the closest baddy
+  // Draw red line to the closest baddy
   // todo: keep it alive on canvas
   ctx.beginPath();
-  ctx.strokeStyle = 'orange';
+  ctx.strokeStyle = 'red';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
     agent.rewardSignal += .8;
@@ -1360,24 +1411,24 @@ function goTooFast() {
   mainLoop().then(() => {
     loopCount++;
 
-    if (loopCount == 500) {
+    if (loopCount == batchSize) {
       const weights = model.actor.getWeights();
       const criticWeights = model.critic.getWeights();
       const weightsData = weights.map(weight => weight.dataSync());
       const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
-      let diff = '';
-      if (oldWeightsData !== null) {
-        for (let i = 0; i < Math.max(oldWeightsData.length, weightsData.length); i++) {
-          if (oldWeightsData[i] !== weightsData[i]) {
-            diff += '^';
-          } else {
-            diff += ' ';
-          }
-        }
-      }
-      console.log('Old: ' + oldWeightsData);
-      console.log('New: ' + weights);
-      console.log('Diff:' + diff);
+      // let diff = '';
+      // if (oldWeightsData !== null) {
+      //   for (let i = 0; i < Math.max(oldWeightsData.length, weightsData.length); i++) {
+      //     if (oldWeightsData[i] !== weightsData[i]) {
+      //       diff += '^';
+      //     } else {
+      //       diff += ' ';
+      //     }
+      //   }
+      // }
+      // console.log('Old: ' + oldWeightsData);
+      // console.log('New: ' + weights);
+      // console.log('Diff:' + diff);
       //console.log('OldCrit: ' + oldWeights);
       //console.log('NewCrit: ' + eights);
       //console.log('DiffCrit:' + diff);
@@ -1389,8 +1440,8 @@ function goTooFast() {
       oldWeightsData = [...weightsData];
 
     }
-    if (loopCount >= 500 || !continueLoop) {
-      if (loopCount >= 500)
+    if (loopCount >= batchSize + 1 || !continueLoop) {
+      if (loopCount >= batchSize + 1)
         loopCount = 0;
       requestAnimationFrame(goTooFast);
     } else if (continueLoop) {
@@ -1401,19 +1452,7 @@ function goTooFast() {
 }
 
 
-// async function goTooFast() {
-//   await mainLoop();
-//   while (continueLoop) {
-//     if (count < 500) {
-//       await mainLoop();
-//     } else {
-//       requestAnimationFrame(mainLoop);
-//       count = 0;
 
-//     }
-//     count++;
-//   }
-// }
 goTooFast();
 //////////////////////////////////////
 
@@ -1450,7 +1489,7 @@ $(function () {
   for (var i = 0, l = blockNum; i < l; i++) {
     blocks.push(new Square({}));
   }
-  const maxAgents = 10;//windowArea / 10000;
+  const maxAgents = 2;//windowArea / 10000;
   const numHumans = 1;
   for (var i = 0, l = maxAgents; i < l; i++) {
     agents.push(new Agent({
