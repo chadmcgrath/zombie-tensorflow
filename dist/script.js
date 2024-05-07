@@ -1,4 +1,4 @@
-//tf.setBackend('cpu');
+tf.setBackend('cpu');
 function circularLoss(yTrue, yPred) {
   
   // Convert angles to 2D vectors
@@ -9,8 +9,9 @@ function circularLoss(yTrue, yPred) {
   return tf.losses.meanSquaredError(yTrue, yPred);
 }
 class ActorCriticModel {
+  
   constructor(numInputs, numActions, hiddenUnits, gamma, batchSize) {
-    this.maxMemorySize = 10000;
+    this.maxMemorySize = 5000;
     this.numInputs = numInputs;
     this.numActions = numActions;
     this.hiddenUnits = hiddenUnits;
@@ -21,7 +22,7 @@ class ActorCriticModel {
     this.alpha = 0.6;  // Controls how much prioritization is used
     this.priorities = [];
 
-    this.initialLearningRate = 0.001;
+    this.initialLearningRate = 0.01;
     // Decay rate
     this.decayRate = 0.01;
     this.steps = 1000000;
@@ -29,38 +30,58 @@ class ActorCriticModel {
     this.gamma = gamma;
     this.batchSize = batchSize;
     this.numOutputs = 2;
+    this.kernalInitializer = tf.initializers.glorotNormal();
 
   }
-
+    // todo: this is broken
   calculateLearningRate() {
     return this.initialLearningRate * Math.pow(this.decayRate, Math.floor(this.globalStep / this.steps));
   }
+    // todo: this is broken
+  policyGradientLoss = (actions, advantages) => {
+    const logProbs = tf.log(actions.add(1));
+    return tf.losses.computeWeightedLoss(logProbs, advantages);
+  };
+ 
   createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
   
-    const hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(stateInput);
-  
+    const hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu',kernelInitializer: this.kernalInitializer}).apply(stateInput);
+    const hidden2 = tf.layers.dense({ units: this.hiddenUnits/2, activation: 'relu',kernelInitializer: this.kernalInitializer}).apply(hidden);
     // Separate output layers for each action
-    const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh' }).apply(hidden);  // Q-value for continuous action
-    const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid' }).apply(hidden);  // Q-value for binary action
+    const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh',kernalInitializer: this.kernalInitializer }).apply(hidden2);  // Q-value for continuous action
+    const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid',kernalInitializer: this.kernalInitializer }).apply(hidden2);  // Q-value for binary action
   
     const model = tf.model({ inputs: stateInput, outputs: [continuousAction, binaryAction] });
   
     const optimizer = tf.train.adam(this.initialLearningRate);
+
     model.compile({ optimizer: optimizer, loss: ['meanSquaredError', 'binaryCrossentropy'] });
   
+    return model;
+  }
+  createCriticModel() {
+    const stateInput = tf.input({ shape: [this.numInputs] });
+    const actionInput = tf.input({ shape: [this.numActions] });
+
+    const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu',kernalInitializer: this.kernalInitializer }).apply(stateInput);
+    const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu',kernalInitializer: this.kernalInitializer }).apply(actionInput);
+
+    const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);
+    const output1 = tf.layers.dense({ units: 1, activation: 'tanh',kernalInitializer: this.kernalInitializer }).apply(merged);
+    const output2 = tf.layers.dense({ units: 1, activation: 'sigmoid',kernalInitializer: this.kernalInitializer }).apply(merged); // or apply to a different layer
+    const model = tf.model({ inputs: [stateInput, actionInput], outputs: [output1, output2] });
+    model.compile({ optimizer: 'adam', loss: ['meanSquaredError', 'binaryCrossentropy'] });
+
     return model;
   }
   async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
     ++this.globalStep;
     const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
-    const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
     const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d(advantagesContinuous.map(x => [x]));
     const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d(advantagesBinary.map(x => [x]));
-
     const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(advantagesContinuous), this.getNumSamples(advantagesBinary));
     const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
-    const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
     const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
     const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
 
@@ -71,12 +92,12 @@ class ActorCriticModel {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
 
-    const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(stateInput);
-    const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu' }).apply(actionInput);
+    const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu',kernalInitializer: this.kernalInitializer }).apply(stateInput);
+    const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu',kernalInitializer: this.kernalInitializer }).apply(actionInput);
 
     const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);
-    const output1 = tf.layers.dense({ units: 1, activation: 'tanh' }).apply(merged);
-    const output2 = tf.layers.dense({ units: 1, activation: 'sigmoid' }).apply(merged); // or apply to a different layer
+    const output1 = tf.layers.dense({ units: 1, activation: 'tanh',kernalInitializer: this.kernalInitializer }).apply(merged);
+    const output2 = tf.layers.dense({ units: 1, activation: 'sigmoid',kernalInitializer: this.kernalInitializer }).apply(merged); // or apply to a different layer
     const model = tf.model({ inputs: [stateInput, actionInput], outputs: [output1, output2] });
     model.compile({ optimizer: 'adam', loss: ['meanSquaredError', 'binaryCrossentropy'] });
 
@@ -313,7 +334,7 @@ const maxWinSide = Math.max(winWidth, winHeight);
 const eyeMaxRange = 1000;
 var oneRad = Math.PI / 180;
 var pi2 = Math.PI * 2;
-var gameSpeed = 20;
+var gameSpeed = 5;
 var EPS = 0.01;
 
 function clone(v) {
@@ -1061,7 +1082,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       }
     }
   }   // for i in seen
-  let continuousAction, binaryAction, oldActions;
+  let oldActions;
   if (this.isHuman) {
     this.state = 'panic';
     this.nextTimer = 5;
@@ -1072,7 +1093,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       states.push(...this.getVision());
       states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI, this.pos.x / maxWinSide, this.pos.y / maxWinSide);
     }
-    [continuousAction, binaryAction] = model.predictActor([states], [actions]);
+    const [continuousAction, binaryAction] = model.predictActor([states], [actions]);
 
 
     // Perform action and get new state and reward
@@ -1099,7 +1120,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       //choose current action, [rotate, move or shoot]        
       // -pi to pi
       const newAngle = continuousActionVal * Math.PI;
-      isMoving = binaryAction >= .5;
+      isMoving = binarayActionVal < .5;
       this.newDir = { x: Math.cos(newAngle), y: Math.sin(newAngle) };
     }
 
@@ -1139,7 +1160,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     if (this.intersect = blocks[i].rayIntersect(this.pos, this.dir)) {
       if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
         this.pos = this.intersect[0].pos;
-        this.rewardSignal = this.rewardSignal - .1;
+        this.rewardSignal = this.rewardSignal - .2;
         //this.newDir = this.intersect[0].n;
         this.newDir = randomAngle();
         break;
@@ -1174,11 +1195,10 @@ Agent.prototype.logic = async function (ctx, clock) {
     bound = true;
   }
   if (bound) {
-    this.rewardSignal = this.rewardSignal - .1;
+    this.rewardSignal = this.rewardSignal - .2;
     normalize(this.newDir);
   }
-  if (!isMoving)
-    this.shoot(this, seen);
+  
 
   if (this.isHuman === true && states.length > 0) {
 
@@ -1189,7 +1209,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     await model.train(oldStates, oldActions, this.rewardSignal, states,actions, batchSize, totalTurns % batchSize === 0);
 
     totalRewards += this.rewardSignal;
-    rewardOverTime.push(totalRewards);
+    rewardOverTime.push(this.rewardSignal);
     $("#rewardTotal").text(totalRewards);
     this.rewardSignal = 0;
   }
@@ -1237,9 +1257,10 @@ Agent.prototype.shoot = (agent, seen) => {
   ctx.strokeStyle = 'red';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
-    agent.rewardSignal += .4;
+    agent.rewardSignal += .6;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
+    closestBaddy.state = 'idle';
     if (closestBaddy.currentHp < 1)
 
       closestBaddy.ring = 10;
@@ -1248,7 +1269,7 @@ Agent.prototype.shoot = (agent, seen) => {
       //closestBaddy.agent.viewFovD2 = this.viewFovD2;
       closestBaddy.speed = 0;
       //closestBaddy.agent.turnSpeed = this.turnSpeed;
-      closestBaddy.state = 'idle';
+      
       closestBaddy.ring = 20;
       agents = agents.filter(agent => agent !== closestBaddy);
       agent.items - agent.items.filter(agent => agent !== closestBaddy);
@@ -1256,6 +1277,8 @@ Agent.prototype.shoot = (agent, seen) => {
   }
   else {
     // missed!
+    // to do: for now, we disgourage it from stopping and missing.
+    --agent.rewardSignal;
     ctx.strokeStyle = 'purple';
     ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
   }
@@ -1403,6 +1426,7 @@ function goTooFast() {
       oldWeights = [...weightsData];
       oldCriticWeights = [...criticWeightsData];
       oldWeightsData = [...weightsData];
+      createOrUpdateRewardChart(rewardOverTime)
 
     }
     if (loopCount >= batchSize + 1 || !continueLoop) {
@@ -1416,6 +1440,39 @@ function goTooFast() {
   });
 }
 
+let chart; // Declare chart variable outside the function
+
+function createOrUpdateRewardChart(rewardOverTime) {
+  let ctx = document.getElementById('rewardOverTimeChart').getContext('2d');
+
+  if (!chart) {
+    // If the chart does not exist, create it
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+          labels: rewardOverTime.map((_, i) => i), // X-axis labels are just indices
+          datasets: [{
+              label: 'Reward over time',
+              data: rewardOverTime,
+              borderColor: 'rgba(75, 192, 192, 1)',
+              fill: false
+          }]
+      },
+      options: {
+          scales: {
+              y: {
+                  beginAtZero: true
+              }
+          }
+      }
+    });
+  } else {
+    // If the chart already exists, update its data
+    chart.data.labels = rewardOverTime.map((_, i) => i);
+    chart.data.datasets[0].data = rewardOverTime;
+    chart.update();
+  }
+}
 
 
 goTooFast();
@@ -1431,26 +1488,7 @@ window.addEventListener('keydown', (event) => {
 //   fpsc = 0;
 // }, 1000);
 $(function () {
-  let ctx = document.getElementById('rewardOverTimeChart').getContext('2d');
-  let chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-        labels: rewardOverTime.map((_, i) => i), // X-axis labels are just indices
-        datasets: [{
-            label: 'Reward over time',
-            data: rewardOverTime,
-            borderColor: 'rgba(75, 192, 192, 1)',
-            fill: false
-        }]
-    },
-    options: {
-        scales: {
-            y: {
-                beginAtZero: true
-            }
-        }
-    }
-});
+  
   $('#gameSpeed').change(function () {
     gameSpeed = $(this).val();
   }).val(gameSpeed);
@@ -1474,7 +1512,7 @@ $(function () {
   for (var i = 0, l = blockNum; i < l; i++) {
     blocks.push(new Square({}));
   }
-  const maxAgents = 2;//windowArea / 10000;
+  const maxAgents = 10;//windowArea / 10000;
   const numHumans = 1;
   for (var i = 0, l = maxAgents; i < l; i++) {
     agents.push(new Agent({
