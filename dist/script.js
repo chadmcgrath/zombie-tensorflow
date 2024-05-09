@@ -54,7 +54,7 @@ class ActorCriticModel {
     const hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateInput);
     const hidden2 = tf.layers.dense({ units: this.hiddenUnits / 2, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(hidden);
     // Separate output layers for each action
-    const continuousAction = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(hidden2);  // Q-value for continuous action
+    const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(hidden2);  // Q-value for continuous action
     const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(hidden2);  // Q-value for binary action
 
     const model = tf.model({ inputs: stateInput, outputs: [continuousAction, binaryAction] });
@@ -62,38 +62,6 @@ class ActorCriticModel {
     const optimizer = tf.train.adam(this.initialLearningRate);
 
     model.compile({ optimizer: optimizer, loss: ['meanSquaredError', 'binaryCrossentropy'] });
-
-    return model;
-  }
-  createCriticModel() {
-    const stateInput = tf.input({ shape: [this.numInputs] });
-    const actionInput = tf.input({ shape: [this.numActions] });
-
-    const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateInput);
-    const stateHidden2 = tf.layers.dense({ units: this.hiddenUnits / 2, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateHidden);
-    const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionInput);
-    const actionHidden2 = tf.layers.dense({ units: this.hiddenUnits / 2, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionHidden);
-
-    const merged = tf.layers.concatenate().apply([stateHidden2, actionHidden2]);
-    const output1 = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(merged);
-    const output2 = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(merged);
-    const model = tf.model({ inputs: [stateInput, actionInput], outputs: [output1, output2] });
-    model.compile({ optimizer: 'adam', loss: ['meanSquaredError', 'binaryCrossentropy'] });
-
-    return model;
-}
-  createCriticModel1Hidden() {
-    const stateInput = tf.input({ shape: [this.numInputs] });
-    const actionInput = tf.input({ shape: [this.numActions] });
-
-    const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateInput);
-    const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionInput);
-
-    const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);
-    const output1 = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(merged);
-    const output2 = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(merged); // or apply to a different layer
-    const model = tf.model({ inputs: [stateInput, actionInput], outputs: [output1, output2] });
-    model.compile({ optimizer: 'adam', loss: ['meanSquaredError', 'binaryCrossentropy'] });
 
     return model;
   }
@@ -109,7 +77,37 @@ class ActorCriticModel {
 
     await this.actor.trainOnBatch([statesBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
   }
+  createCriticModel() {
+    const stateInput = tf.input({ shape: [this.numInputs] });
+    const actionInput = tf.input({ shape: [this.numActions] });
 
+    const stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateInput);
+    const stateHidden2 = tf.layers.dense({ units: this.hiddenUnits / 2, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateHidden);
+    const actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionInput);
+    const actionHidden2 = tf.layers.dense({ units: this.hiddenUnits / 2, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionHidden);
+
+    const merged = tf.layers.concatenate().apply([stateHidden2, actionHidden2]);
+    const output1 = tf.layers.dense({ units: 1, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(merged);
+    const output2 = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(merged);
+    const model = tf.model({ inputs: [stateInput, actionInput], outputs: [output1, output2] });
+    model.compile({ optimizer: 'adam', loss: ['meanSquaredError', 'binaryCrossentropy'] });
+
+    return model;
+} 
+async fitCritic([states, actions], [q1, q2]) {
+  const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
+  const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
+  const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
+  const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
+
+  const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(q1), this.getNumSamples(q2));
+  const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
+  const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
+  const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
+  const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
+
+  await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
+}
   predictCritic(states, actions) {
     return tf.tidy(() => {
       const statesTensor = Array.isArray(states) ? tf.tensor2d(states).slice([0, 0], [Math.min(batchSize, states.length), states[0].length]) : states;
@@ -123,27 +121,13 @@ class ActorCriticModel {
       }
     });
   }
+  
   getNumSamples(data) {
     if (data instanceof tf.Tensor) {
       return data.shape[0];
     } else if (Array.isArray(data)) {
       return data.length;
     }
-  }
-
-  async fitCritic([states, actions], [q1, q2]) {
-    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
-    const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
-    const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
-    const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
-
-    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(q1), this.getNumSamples(q2));
-    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
-    const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
-    const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
-    const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
-
-    await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
   }
 
   remember([state, oldActions, reward, nextState, action, tdError]) {
@@ -158,7 +142,6 @@ class ActorCriticModel {
       console.error('Error or priority is NaN');
     else
       this.priorities.push(priority);  // Prioritize experiences with higher error
-
   }
   sample(batchSize) {
     // Calculate the sum of the priorities
@@ -187,19 +170,10 @@ class ActorCriticModel {
     return [batch, indices];
   }
 
-  async train(oldStates, oldActions, rewardSignal, states, actions, batchSize, isTrain) {
-    if (states.length < 1) {
-      console.error('states in train length is less than 1');
-      return;
-    }
-    // do not process, return if not training
-    if (!isTrain) {
-      this.remember([oldStates, oldActions, rewardSignal, states, actions, .1]);
-      return;
-    }
+  async train() {
+    
     const model = this;
-    const [sample, sampleIndices] = model.sample(batchSize - 1);
-    sample.push([oldStates, oldActions, rewardSignal, states, actions, .1]);
+    const [sample, sampleIndices] = model.sample(this.batchSize);
 
     // Prepare batch data
     let batchOldStates = [];
@@ -250,13 +224,15 @@ class ActorCriticModel {
     for (let i = 0; i < sample.length; i++) {
       const tdError = tdErrorsArray[i];
 
-      // Update tdError for existing experience
+      // Update tdError and priority for existing experience
       if (this.memory[sampleIndices[i]]) {
         this.memory[sampleIndices[i]][5] = tdError;
         const priority = Math.pow(Math.abs(tdError) + 1e-6, this.alpha);  // Recalculate priority
         this.priorities[sampleIndices[i]] = priority;  // Update priority
       } else {
         // Add new experience
+        // should no longer happen anymore
+        console.log('Adding new experience, this probably shouldnt ever happen');
         this.remember([...sample[i], tdError]);
       }
     }
@@ -282,17 +258,6 @@ class ActorCriticModel {
 
       if (Array.isArray(actorOutput) && actorOutput.length === 2) {
         const [continuousActionTensor, binaryActionTensor] = actorOutput;
-        //const continuousAction = continuousActionTensor.dataSync()[0];
-        //const binaryAction = binaryActionTensor.dataSync()[0];
-        // if (isNaN(continuousAction) || isNaN(binaryAction)) {
-        //   const weights = this.actor.getWeights();
-        //   weights.forEach((weight, i) => {
-        //     console.log(`PREDICT-Weight ${i}:`);
-        //     weight.print();
-        //   });
-        //   console.error('continuousAction or binaryAction is NaN');
-
-        // }
         return [continuousActionTensor, binaryActionTensor];
       } else {
         console.error('Actor model output is not an array of length 2');
@@ -571,7 +536,8 @@ Vec.prototype = {
     return new Vec(this.x * Math.cos(a) + this.y * Math.sin(a),
       -this.x * Math.sin(a) + this.y * Math.cos(a));
   },
-
+  getAngle: function () { return Math.atan2(this.y, this.x); },
+  getUnit: function () { var d = this.length(); return new Vec(this.x / d, this.y / d); },
   // in place operations
   scale: function (s) { this.x *= s; this.y *= s; },
   normalize: function () { var d = this.length(); this.scale(1.0 / d); }
@@ -858,15 +824,12 @@ Agent.prototype.getVision = () => {
 
       ctx.moveTo(pos.x, pos.y);
       const sr = e.sensed_proximity;
-
-      const lineToX = pos.x + sr * Math.sin(agentRads + eangle);
-      const lineToY = pos.y + sr * Math.cos(agentRads + eangle);
+      const eyeAngle = rightLeftAngle(agentRads + eangle);
+      const lineToX = pos.x + sr * Math.sin(eyeAngle);
+      const lineToY = pos.y + sr * Math.cos(eyeAngle);
       ctx.lineTo(lineToX, lineToY);
       ctx.stroke();
-
-      // use atan2 to get + and - numbers for the ml model
-      // add to states for ML. tensorflow. ai
-      const lineAngle = Math.atan2(lineToX, lineToY);
+      
       let type = e.sensed_type;
       if (type === 'zombie')
         type = -1;
@@ -876,15 +839,19 @@ Agent.prototype.getVision = () => {
       // add to state for ML
       // closeness of proximity is probably easier to process than distance
       const closeness = 1 - e.sensed_proximity / e.max_range
-
       // tensorflow inputs
-      eyeStates.push(lineAngle / (Math.PI), closeness, type);
+      eyeStates.push(eyeAngle/Math.PI, closeness, type);
     }
   }
   // tensorflow inputs
   return eyeStates;
 }
-
+// converts to bewett - Pi and Pi
+function rightLeftAngle(d) {
+  while (d < -Math.PI) d += 2 * Math.PI;
+  while (d >= Math.PI) d -= 2 * Math.PI;
+  return d;
+}
 Agent.prototype.getColor = function () {
   if (this.state === 'mouse') return '#FF00FF';
   if (this.state === 'panic') return 'yellow';
@@ -1115,13 +1082,19 @@ Agent.prototype.logic = async function (ctx, clock) {
       actions.push(continuousActionVal, binarayActionVal);
       //choose current action, [rotate, move or shoot]        
       // -pi to pi
-      const newAngle = (continuousActionVal-.5) * 2*Math.PI;//continuousActionVal * Math.PI;
+      const newAngle = (continuousActionVal) * Math.PI;//continuousActionVal * Math.PI;
       isMoving = binarayActionVal < .5;
-      this.newDir = new Vec(Math.cos(newAngle), Math.sin(newAngle));
+      this.newDir = new Vec(Math.cos(newAngle), Math.sin(newAngle)).getUnit();
+
+      const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
+      const newVec = unitOldDir.rotate(newAngle);
+      this.dir = newVec;
+      
     }
-
+    if(!isMoving)
+      this.shoot(this, seen);
   }
-
+  
 
   if (this.ring) {
     this.ring += clock.delta * 20;
@@ -1131,7 +1104,7 @@ Agent.prototype.logic = async function (ctx, clock) {
   //zombies when timer runs out go back to random wandering
   if (this.isHuman === false && this.nextTimer <= 0) {
     this.nextTimer = 3 + Math.random() * 3;
-    this.newDir = randomAngle();
+    this.dir=randomAngle();
     this.state = 'idle';
   }
   if (!this.da) this.da = 0;
@@ -1139,9 +1112,9 @@ Agent.prototype.logic = async function (ctx, clock) {
   //this.newDir=pointFromRad(this.da);
   // turn twards desired direction
   // todo. find out max turn rate and if it applies here for humans (isMoving)
-  this.dir = normalize(new Vec(this.dir.x, this.dir.y)).add(new Vec(this.newDir.x, this.newDir.y));//
+  
   if (isNaN(this.dir.x) || isNaN(this.dir.y)) {
-    console.log('this.dir contains NaN');
+    console.error('this.dir contains NaN');
   }
   var speed = isMoving ? (this.speed) * 10 : 0;
 
@@ -1158,7 +1131,7 @@ Agent.prototype.logic = async function (ctx, clock) {
         this.pos = this.intersect[0].pos;
         this.rewardSignal = this.rewardSignal - .1;
         //this.newDir = this.intersect[0].n;
-        this.newDir = randomAngle();
+        this.dir = randomAngle();
         break;
       } else if (this.intersect[0].dist <= this.viewDist) {
 
@@ -1172,37 +1145,37 @@ Agent.prototype.logic = async function (ctx, clock) {
   var bound = false;
   if (this.pos.x < 0) {
     this.pos.x = 0;
-    this.newDir.x = 1;
+    this.dir.x = 1;
     bound = true
   }
   if (this.pos.y < 0) {
     this.pos.y = 0;
-    this.newDir.y = 1;
+    this.dir.y = 1;
     bound = true;
   }
   if (this.pos.x > ctx.canvas.width) {
     this.pos.x = ctx.canvas.width;
-    this.newDir.x = -1;
+    this.dir.x = -1;
     bound = true;
   }
   if (this.pos.y > ctx.canvas.height) {
     this.pos.y = ctx.canvas.height;
-    this.newDir.y = -1;
+    this.dir.y = -1;
     bound = true;
   }
   if (bound) {
     this.rewardSignal = this.rewardSignal - .1;
-    normalize(this.newDir);
+    normalize(this.dir);
   }
 
 
   if (this.isHuman === true && states.length > 0) {
 
-    // if (isNaN(this.rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary) || states.length < 1 || actions.length < 1) {
-    //   console.error('NaN detected IN isNaN(rewardSignal) || isNaN(oldQValueContinuous) || isNaN(oldQValueBinary || states.length <1 || actions.length<1');
-    // }
-
-    await model.train(oldStates, oldActions, this.rewardSignal, states, actions, batchSize, totalTurns % batchSize === 0);
+    model.remember([oldStates, oldActions, this.rewardSignal, states, actions, .1]);
+    if(totalTurns % batchSize === 0){
+      await model.train(oldStates, oldActions, this.rewardSignal, states, actions, batchSize);
+      const saveResult = await model.save('localstorage://zombie-sim-model-ac-1');
+    }
 
     totalRewards += this.rewardSignal;
     rewardOverTime.push(this.rewardSignal);
@@ -1419,6 +1392,7 @@ function goTooFast() {
 
       $("#weights").text(weightsData);
       $("#criticWeights").text(criticWeightsData);
+      $("#current-state").text(states.join(', '));
       oldWeights = [...weightsData];
       oldCriticWeights = [...criticWeightsData];
       oldWeightsData = [...weightsData];

@@ -8,7 +8,9 @@ body {
   border:0;
 }
 
-
+.flex-container {
+  display: flex;
+}
 
 #help {
   position:absolute;
