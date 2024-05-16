@@ -15,7 +15,7 @@ class ActorCriticModel {
     this.priorities = [];
 
 
-    // Decay rate
+    // Decay rate (not currently used - i'm hping adam will handle it)
     this.decayRate = 0.01;
     this.steps = 1000000;
     this.globalStep = 0;
@@ -26,7 +26,7 @@ class ActorCriticModel {
     this.numOutputs = 2;
     this.kernelInitializer = tf.initializers.glorotNormal();
     this.initialLearningRate = learningRate;
-    this.numHiddenLayers = 3;
+    this.numHiddenLayers = 1;
   }
   save(location) {
     this.actor.save(location + '/actor');
@@ -35,16 +35,6 @@ class ActorCriticModel {
   setBatchSize(n) {
     this.batchSize = n;
   }
-  // todo: this is broken
-  calculateLearningRate() {
-    return this.initialLearningRate * Math.pow(this.decayRate, Math.floor(this.globalStep / this.steps));
-  }
-  // todo: this is broken
-  policyGradientLoss = (actions, advantages) => {
-    const logProbs = tf.log(actions.add(1));
-    return tf.losses.computeWeightedLoss(logProbs, advantages);
-  };
-
   createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
 
@@ -52,8 +42,6 @@ class ActorCriticModel {
     for (let i = 1; i < this.numHiddenLayers; i++) {
       hidden = tf.layers.dense({ units: this.hiddenUnits / (i + 1), activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(hidden);
     }
-
-    // Separate output layers for each action
     const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(hidden);  // Q-value for continuous action
     const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(hidden);  // Q-value for binary action
 
@@ -65,18 +53,7 @@ class ActorCriticModel {
 
     return model;
   }
-  async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
-    ++this.globalStep;
-    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
-    const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d(advantagesContinuous.map(x => [x]));
-    const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d(advantagesBinary.map(x => [x]));
-    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(advantagesContinuous), this.getNumSamples(advantagesBinary));
-    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
-    const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
-    const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
 
-    await this.actor.trainOnBatch([statesBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
-  }
   createCriticModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
@@ -99,6 +76,19 @@ class ActorCriticModel {
 
     return model;
   }
+
+  async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
+    ++this.globalStep;
+    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
+    const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d(advantagesContinuous.map(x => [x]));
+    const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d(advantagesBinary.map(x => [x]));
+    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(advantagesContinuous), this.getNumSamples(advantagesBinary));
+    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
+    const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
+    const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
+    const h = await this.actor.trainOnBatch([statesBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
+    return h;
+  }
   async fitCritic([states, actions], [q1, q2]) {
     const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
     const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
@@ -111,7 +101,7 @@ class ActorCriticModel {
     const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
     const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
 
-    await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
+    return await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
   }
   predictCritic(states, actions) {
     return tf.tidy(() => {
@@ -213,12 +203,12 @@ class ActorCriticModel {
     const targetQValue2 = rewardSignalsTensor.add(newQValue2.mul(this.gamma));
 
     // Update critic model
-    await model.fitCritic([newStatesTensor, actionsTensor], [targetQValue1, targetQValue2]);
+    const criticHistory = await model.fitCritic([newStatesTensor, actionsTensor], [targetQValue1, targetQValue2]);
 
     // Update actor model
     const advantageContinuous = targetQValue1.sub(newQValue1);
     const advantageBinary = targetQValue2.sub(newQValue2);
-    await model.fitActor(oldStatesTensor, actionsTensor, advantageContinuous, advantageBinary);
+    const actorHistory = await model.fitActor(oldStatesTensor, actionsTensor, advantageContinuous, advantageBinary);
 
     // Compute TD errors for each experience in the batch
     const qValueNextState = newQValue1.add(newQValue2).div(tf.scalar(2)).reshape([this.batchSize]);
@@ -241,23 +231,14 @@ class ActorCriticModel {
         this.remember([...sample[i], tdError]);
       }
     }
-  }
-  getWeightCollection(w) {
-    const ret = [];
-    weights.forEach((weight, i) => {
-      ret.push(weight);
-    });
-    return ret;
+    return [actorHistory, criticHistory]
   }
 
   predictActor(states, actions) {
     let statesTensor = states;
-    let actionsTensor = actions;
     return tf.tidy(() => {
       if (!(states instanceof tf.Tensor))
         statesTensor = tf.tensor(states).reshape([-1, this.numInputs]);
-      if (!(actions instanceof tf.Tensor))
-        actionsTensor = tf.tensor(actions).reshape([-1, 2]);
 
       const actorOutput = this.actor.predict([statesTensor]);
 
@@ -271,7 +252,8 @@ class ActorCriticModel {
   }
 }
 
-
+const actorLossValues = [];
+const criticLossValues = [];
 let continueLoop = false;
 let loopCount = 0;
 let states = [];
@@ -293,7 +275,7 @@ const learningRate = 0.001;
 //todo:// hidden to low?
 
 const numHidden = 128;
-const batchSize = 256;
+const batchSize = 64;
 
 
 const model = new ActorCriticModel(learningRate, numInputs, numActions, numHidden, gamma, batchSize);
@@ -305,6 +287,8 @@ var oneRad = Math.PI / 180;
 var pi2 = Math.PI * 2;
 var gameSpeed = 5;
 var EPS = 0.01;
+
+
 
 function clone(v) {
   return {
@@ -647,7 +631,7 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
     const windowWalls = {
       bounds: [{ x: 0, y: 0, width: window.innerWidth, height: 0 }, // top    
       { x: window.innerWidth, y: window.innerHeight, width: 0, height: window.innerHeight }]
-    }; 
+    };
     const allWalls = blocks.concat(windowWalls);
 
     for (var i = 0, n = allWalls.length; i < n; i++) {
@@ -756,11 +740,13 @@ function Agent(config) {
   this.ring = config.ring || this.type === 'human' ? 0 : 5;
 }
 
-Agent.prototype.getVision = function(){
+Agent.prototype.getVision = () => {
 
   let eyeStates = [];
-  //for (var i = 0, n = this.items.length; i < n; i++) {
-    var a = this;
+  for (var i = 0, n = this.agents.length; i < n; i++) {
+    var a = this.agents[i];
+    // zombies do not have eyes
+    if (a.eyes.length === 0) continue;
     const pos = a.p;
     const oPointAngle = new Vec(Math.cos(a.oangle), Math.sin(a.oangle));
     const angle = a.angle;
@@ -829,7 +815,7 @@ Agent.prototype.getVision = function(){
       // tensorflow inputs
       eyeStates.push(eyeAngle / Math.PI, closeness, type);
     }
-  //}
+  }
   // tensorflow inputs
   return eyeStates;
 }
@@ -1045,6 +1031,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       //states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI);
     }
     const [continuousAction, binaryAction] = model.predictActor([states], [actions]);
+    
 
 
     // Perform action and get new state and reward
@@ -1067,10 +1054,13 @@ Agent.prototype.logic = async function (ctx, clock) {
 
       const continuousActionVal = continuousAction.dataSync()[0];
       const binarayActionVal = binaryAction.dataSync()[0];
+      if(binarayActionVal > 1 || binarayActionVal<0){
+        console.error('binaryActionVal is > 1 or <0' + binarayActionVal);
+      }
       actions.push(continuousActionVal, binarayActionVal);
       //choose current action, [rotate, move or shoot]        
       // -pi to pi
-      const newAngle = (continuousActionVal) * Math.PI;//continuousActionVal * Math.PI;
+      const newAngle = (continuousActionVal) * .5 * Math.PI;//continuousActionVal * Math.PI;
       isMoving = binarayActionVal < .5;
       this.newDir = new Vec(Math.cos(newAngle), Math.sin(newAngle)).getUnit();
 
@@ -1161,7 +1151,11 @@ Agent.prototype.logic = async function (ctx, clock) {
 
     model.remember([oldStates, oldActions, this.rewardSignal, states, actions, .1]);
     if (totalTurns % batchSize === 0) {
-      await model.train(oldStates, oldActions, this.rewardSignal, states, actions, batchSize);
+      const [actorHistory, criticHistory] = await model.train(oldStates, oldActions, this.rewardSignal, states, actions, batchSize);
+      const [actorLossTotal, actorLoss1, actorLoss2] = actorHistory;
+      const [criticLossTotal, criticLoss1, criticLoss2] = criticHistory;
+      actorLossValues.push({ loss1: actorLoss1, loss2: actorLoss2 });
+      criticLossValues.push({ loss1: criticLoss1, loss2: criticLoss2 });
       if (totalTurns % (batchSize * 100) === 0) {
         const saveResult = await model.save('indexeddb://zombie-ac-2layer-1');
       }
@@ -1354,54 +1348,106 @@ let oldCriticWeights = null;
 async function goTooFast() {
 
   await mainLoop();
-    loopCount++;
+  loopCount++;
 
-    if (loopCount >= batchSize * 10) {
-      const weights = model.actor.getWeights();
-      const criticWeights = model.critic.getWeights();
-      const weightsData = weights.map(weight => weight.dataSync());
-      const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
-      // let diff = '';
-      // if (oldWeightsData !== null) {
-      //   for (let i = 0; i < Math.max(oldWeightsData.length, weightsData.length); i++) {
-      //     if (oldWeightsData[i] !== weightsData[i]) {
-      //       diff += '^';
-      //     } else {
-      //       diff += ' ';
-      //     }
-      //   }
-      // }
-      // console.log('Old: ' + oldWeightsData);
-      // console.log('New: ' + weights);
-      // console.log('Diff:' + diff);
-      //console.log('OldCrit: ' + oldWeights);
-      //console.log('NewCrit: ' + eights);
-      //console.log('DiffCrit:' + diff);
+  if (loopCount >= batchSize * 10) {
+    const weights = model.actor.getWeights();
+    const criticWeights = model.critic.getWeights();
+    const weightsData = weights.map(weight => weight.dataSync());
+    const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
+    // let diff = '';
+    // if (oldWeightsData !== null) {
+    //   for (let i = 0; i < Math.max(oldWeightsData.length, weightsData.length); i++) {
+    //     if (oldWeightsData[i] !== weightsData[i]) {
+    //       diff += '^';
+    //     } else {
+    //       diff += ' ';
+    //     }
+    //   }
+    // }
+    // console.log('Old: ' + oldWeightsData);
+    // console.log('New: ' + weights);
+    // console.log('Diff:' + diff);
+    //console.log('OldCrit: ' + oldWeights);
+    //console.log('NewCrit: ' + eights);
+    //console.log('DiffCrit:' + diff);
 
-      $("#weights").text(weightsData);
-      $("#criticWeights").text(criticWeightsData);
-      $("#current-state").text(states.join(', '));
-      oldWeights = [...weightsData];
-      oldCriticWeights = [...criticWeightsData];
-      oldWeightsData = [...weightsData];
-      await createOrUpdateRewardChart(rewardOverTime, batchSize)
+    $("#weights").text(weightsData);
+    $("#criticWeights").text(criticWeightsData);
+    $("#current-state").text(states.join(', '));
+    oldWeights = [...weightsData];
+    oldCriticWeights = [...criticWeightsData];
+    oldWeightsData = [...weightsData];
+    await createOrUpdateRewardChart(rewardOverTime, batchSize)
+    await createOrUpdateLossesChart();
 
-    }
-    if (loopCount >= batchSize * 10 || !continueLoop) {
-      if (loopCount >= batchSize * 10)
-        loopCount = 0;
-      ctx = canvas.getContext('2d');
-      requestAnimationFrame(goTooFast);
-    } else if (continueLoop) {
-      ctx = {
-        beginPath: function () { },
-        arc: function () { },
-        fill: function () { },
-        stroke: function () { },
-        // Add any other methods you use
-      };
-      await goTooFast();
-    }
+  }
+  if (loopCount >= batchSize * 10 || !continueLoop) {
+    if (loopCount >= batchSize * 10)
+      loopCount = 0;
+    ctx = canvas.getContext('2d');
+    requestAnimationFrame(goTooFast);
+  } else if (continueLoop) {
+    ctx = {
+      beginPath: function () { },
+      arc: function () { },
+      fill: function () { },
+      stroke: function () { },
+      // Add any other methods you use
+    };
+    await goTooFast();
+  }
+}
+let lossesChart;
+async function createOrUpdateLossesChart() {
+  const ctx = document.getElementById('losses-chart').getContext('2d');
+  if (!lossesChart){
+    lossesChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: actorLossValues.map((_, i) => i + 1),
+        datasets: [{
+          label: 'Actor Loss 1',
+          data: actorLossValues.map(loss => loss.loss1),
+          backgroundColor: 'rgba(255, 99, 132, 0.2)',
+          borderColor: 'rgba(255, 99, 132, 1)',
+          borderWidth: 1
+        }, {
+          label: 'Actor Loss 2',
+          data: actorLossValues.map(loss => loss.loss2),
+          backgroundColor: 'rgba(255, 159, 64, 0.2)',
+          borderColor: 'rgba(255, 159, 64, 1)',
+          borderWidth: 1
+        }, {
+          label: 'Critic Loss 1',
+          data: criticLossValues.map(loss => loss.loss1),
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 1
+        }, {
+          label: 'Critic Loss 2',
+          data: criticLossValues.map(loss => loss.loss2),
+          backgroundColor: 'rgba(153, 102, 255, 0.2)',
+          borderColor: 'rgba(153, 102, 255, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  } else {
+    lossesChart.data.labels = actorLossValues.map((_, i) => i + 1);
+    lossesChart.data.datasets[0].data = actorLossValues.map(loss => loss.loss1);
+    lossesChart.data.datasets[1].data = actorLossValues.map(loss => loss.loss2);
+    lossesChart.data.datasets[2].data = criticLossValues.map(loss => loss.loss1);
+    lossesChart.data.datasets[3].data = criticLossValues.map(loss => loss.loss2);
+    lossesChart.update();
+  }
 }
 
 let chart; // Declare chart variable outside the function
