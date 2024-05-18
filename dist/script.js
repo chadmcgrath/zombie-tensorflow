@@ -2,7 +2,7 @@ tf.setBackend('cpu');
 
 class ActorCriticModel {
 
-  constructor(learningRate, numInputs, numActions, hiddenUnits, gamma, batchSize) {
+  constructor(learningRate, numLayers, numInputs, numActions, hiddenUnits, gamma, batchSize) {
     this.maxMemorySize = 5000;
     this.numInputs = numInputs;
     this.numActions = numActions;
@@ -15,7 +15,7 @@ class ActorCriticModel {
     this.priorities = [];
 
 
-    // Decay rate (not currently used - i'm hping adam will handle it)
+    // Decay rate (not currently used - i'm hoping adam will handle it)
     this.decayRate = 0.01;
     this.steps = 1000000;
     this.globalStep = 0;
@@ -26,7 +26,7 @@ class ActorCriticModel {
     this.numOutputs = 2;
     this.kernelInitializer = tf.initializers.glorotNormal();
     this.initialLearningRate = learningRate;
-    this.numHiddenLayers = 1;
+    this.numHiddenLayers = numLayers;
   }
   save(location) {
     this.actor.save(location + '/actor');
@@ -40,7 +40,9 @@ class ActorCriticModel {
 
     let hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      hidden = tf.layers.dense({ units: this.hiddenUnits / (i + 1), activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(hidden);
+      //hidden = tf.layers.dense({ units: this.hiddenUnits / (i + 1), activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(hidden);
+      hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(hidden);
+
     }
     const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(hidden);  // Q-value for continuous action
     const binaryAction = tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: this.kernelInitializer }).apply(hidden);  // Q-value for binary action
@@ -60,12 +62,12 @@ class ActorCriticModel {
 
     let stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      stateHidden = tf.layers.dense({ units: this.hiddenUnits / (i + 1), activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateHidden);
+      stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(stateHidden);
     }
 
     let actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      actionHidden = tf.layers.dense({ units: this.hiddenUnits / (i + 1), activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionHidden);
+      actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(actionHidden);
     }
 
     const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);
@@ -79,29 +81,18 @@ class ActorCriticModel {
 
   async fitActor(states, actions, advantagesContinuous, advantagesBinary) {
     ++this.globalStep;
-    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
-    const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d(advantagesContinuous.map(x => [x]));
-    const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d(advantagesBinary.map(x => [x]));
-    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(advantagesContinuous), this.getNumSamples(advantagesBinary));
-    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
-    const advantagesContinuousBatch = advantagesContinuousTensor.slice([0, 0], [numSamples, 1]);
-    const advantagesBinaryBatch = advantagesBinaryTensor.slice([0, 0], [numSamples, 1]);
-    const h = await this.actor.trainOnBatch([statesBatch], [advantagesContinuousBatch, advantagesBinaryBatch]);
-    return h;
+    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d([states]);
+    const advantagesContinuousTensor = advantagesContinuous instanceof tf.Tensor ? advantagesContinuous : tf.tensor2d([advantagesContinuous]);
+    const advantagesBinaryTensor = advantagesBinary instanceof tf.Tensor ? advantagesBinary : tf.tensor2d([advantagesBinary]);
+    return await this.actor.trainOnBatch(statesTensor, [advantagesContinuousTensor, advantagesBinaryTensor]);
+
   }
   async fitCritic([states, actions], [q1, q2]) {
-    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d(states);
-    const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d(actions);
-    const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d(q1.map(x => [x]));
-    const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d(q2.map(x => [x]));
-
-    const numSamples = Math.min(this.batchSize, this.getNumSamples(states), this.getNumSamples(actions), this.getNumSamples(q1), this.getNumSamples(q2));
-    const statesBatch = statesTensor.slice([0, 0], [numSamples, statesTensor.shape[1]]);
-    const actionsBatch = actionsTensor.slice([0, 0], [numSamples, actionsTensor.shape[1]]);
-    const q1Batch = q1Tensor.slice([0, 0], [numSamples, 1]);
-    const q2Batch = q2Tensor.slice([0, 0], [numSamples, 1]);
-
-    return await this.critic.trainOnBatch([statesBatch, actionsBatch], [q1Batch, q2Batch]);
+    const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d([states]);
+    const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d([actions]);
+    const q1Tensor = q1 instanceof tf.Tensor ? q1 : tf.tensor2d([q1]);
+    const q2Tensor = q2 instanceof tf.Tensor ? q2 : tf.tensor2d([q2]);
+    return await this.critic.trainOnBatch([statesTensor, actionsTensor], [q1Tensor, q2Tensor]);
   }
   predictCritic(states, actions) {
     return tf.tidy(() => {
@@ -110,13 +101,28 @@ class ActorCriticModel {
       const criticOutput = this.critic.predict([statesTensor, actionsTensor]);
       if (Array.isArray(criticOutput) && criticOutput.length === 2) {
         const [criticOutput1, criticOutput2] = criticOutput;
-        return [criticOutput1, criticOutput2];
+        return [criticOutput1.squeeze(), criticOutput2.squeeze()];
       } else {
         console.error('critic model output is not an array of length 2');
       }
     });
   }
+  predictActor(states) {
+    let statesTensor = states;
+    return tf.tidy(() => {
+      if (!(states instanceof tf.Tensor))
+        statesTensor = tf.tensor2d([states]);
 
+      const actorOutput = this.actor.predict(statesTensor);
+
+      if (Array.isArray(actorOutput) && actorOutput.length === 2) {
+        const [continuousActionTensor, binaryActionTensor] = actorOutput;
+        return [continuousActionTensor.squeeze(), binaryActionTensor.squeeze()];
+      } else {
+        console.error('Actor model output is not an array of length 2');
+      }
+    });
+  }
   getNumSamples(data) {
     if (data instanceof tf.Tensor) {
       return data.shape[0];
@@ -125,13 +131,15 @@ class ActorCriticModel {
     }
   }
 
-  remember([state, oldActions, reward, nextState, action, tdError]) {
+  remember([state, oldActions, reward, nextState, actions, tdError]) {
     if (this.memory.length >= this.maxMemorySize) {
       this.memory.shift();
       this.priorities.shift();
     }
     const tdErrorValue = isNaN(tdError) ? tdError.dataSync()[0] : tdError;
-    this.memory.push([state, oldActions, reward, nextState, action, tdErrorValue]);
+    if(actions.some(a => a>1) || actions.some(a => a < -1))
+      console.error('actions contain values outside of [-1S,1]');
+    this.memory.push([state, oldActions, reward, nextState, actions, tdErrorValue]);
     const priority = Math.pow(Math.abs(tdErrorValue) + 1e-6, this.alpha);  // Prioritize experiences with higher error
     if (isNaN(tdErrorValue) || isNaN(priority))
       console.error('Error or priority is NaN');
@@ -191,12 +199,9 @@ class ActorCriticModel {
     const actionsTensor = tf.tensor(batchActions);
     const rewardSignalsTensor = tf.tensor(batchRewardSignals);
     const newStatesTensor = tf.tensor(batchNewStates);
+
     const [oldQValueContinuous, oldQValueBinary] = model.predictCritic(oldStatesTensor, oldActionsTensor);
-    // Predict Q-values for new states
     const [newQValue1, newQValue2] = model.predictCritic(newStatesTensor, actionsTensor);
-    // if (newQValue1.some(isNaN) || newQValue2.some(isNaN)) {
-    //   console.error('newQValue1 or newQValue2 contains NaN');
-    // }
 
     // Compute target Q-values
     const targetQValue1 = rewardSignalsTensor.add(newQValue1.mul(this.gamma));
@@ -208,7 +213,11 @@ class ActorCriticModel {
     // Update actor model
     const advantageContinuous = targetQValue1.sub(newQValue1);
     const advantageBinary = targetQValue2.sub(newQValue2);
+
     const actorHistory = await model.fitActor(oldStatesTensor, actionsTensor, advantageContinuous, advantageBinary);
+
+
+
 
     // Compute TD errors for each experience in the batch
     const qValueNextState = newQValue1.add(newQValue2).div(tf.scalar(2)).reshape([this.batchSize]);
@@ -234,22 +243,7 @@ class ActorCriticModel {
     return [actorHistory, criticHistory]
   }
 
-  predictActor(states, actions) {
-    let statesTensor = states;
-    return tf.tidy(() => {
-      if (!(states instanceof tf.Tensor))
-        statesTensor = tf.tensor(states).reshape([-1, this.numInputs]);
 
-      const actorOutput = this.actor.predict([statesTensor]);
-
-      if (Array.isArray(actorOutput) && actorOutput.length === 2) {
-        const [continuousActionTensor, binaryActionTensor] = actorOutput;
-        return [continuousActionTensor, binaryActionTensor];
-      } else {
-        console.error('Actor model output is not an array of length 2');
-      }
-    });
-  }
 }
 
 const actorLossValues = [];
@@ -271,14 +265,14 @@ const numEpisodes = 5000;
 const gamma = 0.6;  // Discount factor
 const numActions = 2;
 const numInputs = 90;
-const learningRate = 0.001;
-//todo:// hidden to low?
-
+1;
+const learningRate = 0.0001;
 const numHidden = 128;
-const batchSize = 64;
+const batchSize = 512;
+const numLayers=1;
 
 
-const model = new ActorCriticModel(learningRate, numInputs, numActions, numHidden, gamma, batchSize);
+const model = new ActorCriticModel(learningRate, numLayers, numInputs, numActions, numHidden, gamma, batchSize);
 const winWidth = +$(window).width();
 const winHeight = +$(window).height();
 const maxWinSide = Math.max(winWidth, winHeight);
@@ -891,25 +885,6 @@ Agent.prototype.see = function () {
           angle: angle
         });
     }
-    // if (good) {
-    //   const angle = normalize(sub(a.pos, this.pos))
-    //   viewBlocked = false;
-    //   for (var wi = 0, wl = blocks.length; wi < wl; wi++) {
-    //     // todo: why was this only = not ==
-    //     if (walls = blocks[wi].rayIntersect(a.pos, angle)) {
-    //       if (walls && walls[0].dist > 0 && walls[0].dist < d) {
-    //         viewBlocked = true;
-    //         break;
-    //       }
-    //     }
-    //   }
-    //   if (!viewBlocked)
-    //     seen.push({
-    //       agent: a,
-    //       dist: d,
-    //       angle: angle
-    //     });
-    // }
   }
 
   if (seen.length > 1) seen.sort(function (a, b) {
@@ -1030,8 +1005,10 @@ Agent.prototype.logic = async function (ctx, clock) {
       console.log('got vison 1st time');
       //states.push(Math.atan2(this.dir.x, this.dir.y) / Math.PI);
     }
-    const [continuousAction, binaryAction] = model.predictActor([states], [actions]);
-    
+    const [continuousAction, binaryAction] = model.predictActor(states);
+    if(continuousAction.dataSync()[0] > 1 || continuousAction.dataSync()[0] < -1){
+      console.error('continuousAction is > 1 or < -1. =' + continuousAction.dataSync()[0]);
+    }
 
 
     // Perform action and get new state and reward
@@ -1044,33 +1021,34 @@ Agent.prototype.logic = async function (ctx, clock) {
     let epsilon = .15;
 
     actions = [];
+    let binarayActionVal;
+    let newAngle;
     if (Math.random() < epsilon) {
       // Take a random action
-      this.newDir = randomAngle();
-      const rndMove = Math.random();
-      isMoving = rndMove < .5;
-      actions.push(Math.atan2(this.newDir.x, this.newDir.y), rndMove);
+      newAngel = randomAngle();
+      binarayActionVal = Math.random();
+      continuousActionVal = Math.atan2(newAngel.x, newAngel.y)/Math.PI;
+      
     } else {
 
-      const continuousActionVal = continuousAction.dataSync()[0];
-      const binarayActionVal = binaryAction.dataSync()[0];
+      continuousActionVal = continuousAction.dataSync()[0];
+      binarayActionVal = binaryAction.dataSync()[0];
       if(binarayActionVal > 1 || binarayActionVal<0){
-        console.error('binaryActionVal is > 1 or <0' + binarayActionVal);
+        console.error('binaryActionVal is > 1 or <0. =' + binarayActionVal);
       }
-      actions.push(continuousActionVal, binarayActionVal);
-      //choose current action, [rotate, move or shoot]        
-      // -pi to pi
-      const newAngle = (continuousActionVal) * .5 * Math.PI;//continuousActionVal * Math.PI;
-      isMoving = binarayActionVal < .5;
-      this.newDir = new Vec(Math.cos(newAngle), Math.sin(newAngle)).getUnit();
-
-      const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
-      const newVec = unitOldDir.rotate(newAngle);
-      this.dir = newVec;
-
+      
     }
+    newAngle = (continuousActionVal) * .5 * Math.PI;//continuousActionVal * Math.PI;
+    isMoving = binarayActionVal < .5;
     if (!isMoving)
       this.shoot(this, seen);
+  
+    const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
+    const newVec = unitOldDir.rotate(newAngle);
+    this.dir = newVec;
+
+    actions.push(continuousActionVal, binarayActionVal);
+    ;
   }
 
 
@@ -1151,7 +1129,7 @@ Agent.prototype.logic = async function (ctx, clock) {
 
     model.remember([oldStates, oldActions, this.rewardSignal, states, actions, .1]);
     if (totalTurns % batchSize === 0) {
-      const [actorHistory, criticHistory] = await model.train(oldStates, oldActions, this.rewardSignal, states, actions, batchSize);
+      const [actorHistory, criticHistory] = await model.train();
       const [actorLossTotal, actorLoss1, actorLoss2] = actorHistory;
       const [criticLossTotal, criticLoss1, criticLoss2] = criticHistory;
       actorLossValues.push({ loss1: actorLoss1, loss2: actorLoss2 });
