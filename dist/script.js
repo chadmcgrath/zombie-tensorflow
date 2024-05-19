@@ -30,7 +30,7 @@ class ActorCriticModel {
     this.initialLearningRate = learningRate;
     this.numHiddenLayers = numLayers;
 
-    const hiddenActivation = 'tanh';
+    this.hiddenActivation = 'elu';
   }
   save(location) {
     this.actor.save(location + '/actor');
@@ -42,10 +42,10 @@ class ActorCriticModel {
   createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
 
-    let hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(stateInput);
+    let hidden = tf.layers.dense({ units: this.hiddenUnits, activation:this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
       //hidden = tf.layers.dense({ units: this.hiddenUnits / (i + 1), activation: 'relu', kernelInitializer: this.kernelInitializer }).apply(hidden);
-      hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(hidden);
+      hidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(hidden);
 
     }
     const continuousAction = tf.layers.dense({ units: 1, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(hidden);  // Q-value for continuous action
@@ -64,14 +64,14 @@ class ActorCriticModel {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
 
-    let stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(stateInput);
+    let stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(stateHidden);
+      stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateHidden);
     }
 
-    let actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(actionInput);
+    let actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(actionInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(actionHidden);
+      actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(actionHidden);
     }
 
     const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);

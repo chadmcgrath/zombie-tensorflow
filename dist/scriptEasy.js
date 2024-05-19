@@ -1,5 +1,6 @@
 /* global tf */
 /* global $ */
+//tf.enableDebugMode();
 tf.setBackend('cpu');
 
 class ActorCriticModel {
@@ -30,7 +31,7 @@ class ActorCriticModel {
     this.initialLearningRate = learningRate;
     this.numHiddenLayers = numLayers;
 
-    const hiddenActivation = 'tanh';
+    this.hiddenActivation = 'tanh';
   }
   save(location) {
     this.actor.save(location + '/actor');
@@ -38,13 +39,13 @@ class ActorCriticModel {
   }
   setBatchSize(n) {
     this.batchSize = n;
-  }
+  };
   createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
   
-    let hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(stateInput);
+    let hidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      hidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(hidden);
+      hidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(hidden);
     }
   
     const actions = tf.layers.dense({ units: numActions, activation: 'softmax', kernelInitializer: this.kernelInitializer }).apply(hidden);
@@ -62,14 +63,14 @@ class ActorCriticModel {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] }); // Changed to match the number of discrete actions
   
-    let stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(stateInput);
+    let stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(stateHidden);
+      stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateHidden);
     }
   
-    let actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(actionInput);
+    let actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(actionInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: 'tanh', kernelInitializer: this.kernelInitializer }).apply(actionHidden);
+      actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(actionHidden);
     }
   
     const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);
@@ -81,7 +82,7 @@ class ActorCriticModel {
     return model;
   }
 
-  async fitActor(states, advantages) {
+  async fitActor(states, advantages, actions) {
     const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d([states]);
     let advantagesTensor = advantages instanceof tf.Tensor ? advantages : tf.tensor2d([advantages]);
 
@@ -89,9 +90,11 @@ class ActorCriticModel {
     if (advantagesTensor.rank === 1) {
         advantagesTensor = advantagesTensor.expandDims(1);
     }
-
-    // Repeat the advantages for each action
-    advantagesTensor = tf.tile(advantagesTensor, [1, this.numActions]);
+      
+    const actionsMax = actions.argMax(1);
+    // Create a 2D tensor where the advantage is applied to the action with the maximum probability
+    const actionsOneHot = tf.oneHot(actionsMax, this.numActions);
+    advantagesTensor = advantagesTensor.mul(actionsOneHot);
 
     return await this.actor.trainOnBatch(statesTensor, advantagesTensor);
 }
@@ -131,8 +134,10 @@ class ActorCriticModel {
       this.priorities.shift();
     }
     const tdErrorValue = isNaN(tdError) ? tdError.dataSync()[0] : tdError;
-    if(actions.some(a => a>15) || actions.some(a => a < 0))
-      console.error('actions contain values outside of [-1S,1]');
+    if(actions.some(a => a>15) || actions.some(a => a < 0) || actions.length !== this.numActions)
+      console.error('actions contain values outside of [-1S,1] or is 0 length');
+    if(oldActions.some(a => a>15) || oldActions.some(a => a < 0) || oldActions.length !== this.numActions)
+      console.error('oldactions contain values outside of [-1S,1] or is 0 length');
     this.memory.push([state, oldActions, reward, nextState, actions, tdErrorValue]);
     const priority = Math.pow(Math.abs(tdErrorValue) + 1e-6, this.alpha);  // Prioritize experiences with higher error
     if (isNaN(tdErrorValue) || isNaN(priority))
@@ -178,6 +183,8 @@ class ActorCriticModel {
     let batchNewStates = [];
   
     for (let [oldStates, actions, rewardSignal, states] of sample) {
+      if(actions.length !== this.numActions)
+        console.error('actions is 0 length: sample'+ sample );
       batchOldStates.push(oldStates);
       batchActions.push(actions);
       batchRewardSignals.push(rewardSignal);
@@ -186,34 +193,79 @@ class ActorCriticModel {
   
     // Convert to tensors
     const oldStatesTensor = tf.tensor(batchOldStates);
-    const actionsTensor = tf.tensor(batchActions).reshape([-1, 16]);
+    const actionsTensor = tf.tensor(batchActions);
     const rewardSignalsTensor = tf.tensor(batchRewardSignals);
     const newStatesTensor = tf.tensor(batchNewStates);
-  
+    if (tf.any(tf.isNaN(oldStatesTensor)).dataSync()[0]) {
+      console.error('oldStatesTensor contains NaN');
+    }
+    if (tf.any(tf.isNaN(actionsTensor)).dataSync()[0]) {
+      console.error('actionsTensor contains NaN');
+    }
+    if (tf.any(tf.isNaN(rewardSignalsTensor)).dataSync()[0]) {
+      console.error('rewardSignalsTensor contains NaN');
+    }
+    if (tf.any(tf.isNaN(newStatesTensor )).dataSync()[0]) {
+      console.error('newStatesTensor  contains NaN');
+    }
     const oldQValue = model.predictCritic(oldStatesTensor, actionsTensor);
+    if (tf.any(tf.isNaN( oldQValue)).dataSync()[0]) {
+      console.error('oldQValue contains NaN '+oldQValue.dataSync()[0]);
+      const weights = model.actor.getWeights();
+    const criticWeights = model.critic.getWeights();
+    const weightsData = weights.map(weight => weight.dataSync());
+    const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
+
+    $("#weights").text(weightsData);
+    $("#criticWeights").text(criticWeightsData);
+    console.error(criticWeightsData);
+    $("#current-state").text(states.join(', '));
+    }
     const newQValue = model.predictCritic(newStatesTensor, actionsTensor);
-  
+    
+    if (tf.any(tf.isNaN( newQValue)).dataSync()[0]) {
+      console.error('newQValue  contains NaN '+oldQValue.dataSync()[0]);
+    }
     // Compute target Q-values
     const targetQValue = rewardSignalsTensor.add(newQValue.mul(this.gamma));
+    if (tf.any(tf.isNaN(targetQValue)).dataSync()[0]) {
+      console.error('targetQValue  contains NaN');
+    }
     // Update critic model
     const criticHistory = await model.fitCritic(oldStatesTensor, actionsTensor, targetQValue);
-  
+  if(isNaN(criticHistory))
+    {
+      const weights = model.actor.getWeights();
+    const criticWeights = model.critic.getWeights();
+    const weightsData = weights.map(weight => weight.dataSync());
+    const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
+
+    $("#weights").text(weightsData);
+    $("#criticWeights").text(criticWeightsData);
+    $("#current-state").text(states.join(', '));
+      console.error('criticHistory NaN');
+    }
     // Update actor model
     const advantage = targetQValue.sub(newQValue);
-    const actorHistory = await model.fitActor(oldStatesTensor, advantage);
+    const actorHistory = await model.fitActor(oldStatesTensor, advantage, actionsTensor);
   
     // Compute TD errors for each experience in the batch
     const qValueNextState = newQValue.reshape([this.batchSize]);
     const qValueCurrent = oldQValue.reshape([this.batchSize]);
     const tdErrors = rewardSignalsTensor.add(qValueNextState.mul(this.gamma)).sub(qValueCurrent);
+    
     const tdErrorsArray = tdErrors.dataSync();
+    if(tdErrorsArray.some(t => isNaN(t)))
+      {
+        console.error('tdErrors contains NaN');
+      }
     for (let i = 0; i < sample.length; i++) {
       const tdError = tdErrorsArray[i];
   
       // Update tdError and priority for existing experience
       if (this.memory[sampleIndices[i]]) {
-        this.memory[sampleIndices[i]][4] = tdError;
-        const priority = Math.pow(Math.abs(tdError) + 1e-6, this.alpha);  // Recalculate priority
+        this.memory[sampleIndices[i]][5] = tdError;
+        const priority = Math.abs(tdError);  // Recalculate priority
         this.priorities[sampleIndices[i]] = priority;  // Update priority
       } else {
         // Add new experience
@@ -231,7 +283,7 @@ let continueLoop = false;
 let loopCount = 0;
 let states = [];
 let oldStates = []
-let actions = [0, 0];
+let actions = [];
 let negRewards = 0;
 let totalRewards = 0;
 let rewardOverTime = [];
@@ -831,7 +883,12 @@ Agent.prototype.logic = async function (ctx, clock) {
     }
     const predictedActionTensor = model.predictActor(states);
     
-    
+    if (actions.length < 1) {
+      const actionsOneHot = Array(numActions).fill(0);
+      actionsOneHot[numActions-1] = 1;
+      actions = actionsOneHot;
+      console.log('made fake actions shoot');
+    }
     
     // Perform action and get new state and reward
     oldActions = [...actions];
@@ -846,10 +903,12 @@ Agent.prototype.logic = async function (ctx, clock) {
     if (Math.random() < epsilon) {
       // Take a random action
       actionSelected =  Math.floor(Math.random() * 16);
-      
+      const actionsOneHot = Array(numActions).fill(0);
+      actionsOneHot[actionSelected] = 1;
+      actions = actionsOneHot; 
     } else {
-      actionSelected = tf.argMax(predictedActionTensor).dataSync()[0];
-    
+      actionSelected = tf.argMax(predictedActionTensor,1).dataSync()[0]; 
+      actions = predictedActionTensor.arraySync()[0];  
     }
     let newAngle =0;
     if (actionSelected < (numActions -1)) {
@@ -860,10 +919,9 @@ Agent.prototype.logic = async function (ctx, clock) {
     }  
     const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
     const newVec = unitOldDir.rotate(newAngle);
-    this.dir = newVec;
-
-    actions.push(predictedActionTensor.arraySync());
-    
+    this.dir = newVec; 
+    if(actions.length !== 16)
+      console.error('actions length is not 16');
   }
 
 
@@ -937,11 +995,11 @@ Agent.prototype.logic = async function (ctx, clock) {
 
   if (this.isHuman === true && states.length > 0) {
 
-    model.remember([oldStates, oldActions, this.rewardSignal, states, actions, .1]);
+    model.remember([oldStates, oldActions, this.rewardSignal, states, actions, 1]);
     if (totalTurns % batchSize === 0) {
       const [actorHistory, criticHistory, samples] = await model.train();
       actorLossValues.push( actorHistory);
-      criticLossValues.push( actorHistory);
+      criticLossValues.push( criticHistory);
       if (totalTurns % (batchSize * 100) === 0) {
         const saveResult = await model.save('indexeddb://zombie-ac-2layer-1');
       }
@@ -998,7 +1056,7 @@ Agent.prototype.shoot = (agent, seen) => {
   ctx.strokeStyle = 'red';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
-    agent.rewardSignal += 1;
+    agent.rewardSignal += 10;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
     //closestBaddy.state = 'idle';
@@ -1141,7 +1199,7 @@ async function goTooFast() {
   await mainLoop();
   loopCount++;
 
-  if (loopCount >= batchSize * 10) {
+  if (loopCount <=1) {
     const weights = model.actor.getWeights();
     const criticWeights = model.critic.getWeights();
     const weightsData = weights.map(weight => weight.dataSync());
