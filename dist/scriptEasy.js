@@ -293,7 +293,7 @@ let totalTurns = 0;
 
 const gamma = 0.6;  // Discount factor
 const numActions = 16;
-const numInputs = 90;
+const numInputs = 91;
 const learningRate = 0.001;
 const numHidden = 90;
 const batchSize = 264;
@@ -552,7 +552,7 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
 
       let res = lineIntersectsSquare(p1, p2, wall);
       if (res) {
-        res.type = 0; // is wall
+        res.type = -.1; // is wall
         // Calculate the distance from p1 to the intersection point
         let dx = p1.x - res.up.x;
         let dy = p1.y - res.up.y;
@@ -671,7 +671,7 @@ Agent.prototype.getVision = () => {
     for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
       var e = a.eyes[ei];
       const eangle = e.angle;
-      const currentEyeAnglePointing = agentRads + eangle;
+      const currentEyeAnglePointing = eangle;//agentRads + eangle;
       // we have a line from p to p->eyep
       var eyep = new Vec(pos.x + e.max_range * Math.sin(currentEyeAnglePointing),
         pos.y + e.max_range * Math.cos(currentEyeAnglePointing));
@@ -879,6 +879,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     if (states.length < 1) {
       states = [];
       states.push(...this.getVision());
+      states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
       console.log('got vision 1st time');
     }
     const predictedActionTensor = model.predictActor(states);
@@ -895,6 +896,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     oldStates = [...states];
     states = [];
     states.push(...this.getVision());
+    states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
 
     let epsilon = .15;
 
