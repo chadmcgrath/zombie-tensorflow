@@ -17,12 +17,10 @@ class ActorCriticModel {
     this.alpha = 0.6;  // Controls how much prioritization is used
     this.priorities = [];
 
-
     // Decay rate (not currently used - i'm hoping adam will handle it)
     this.decayRate = 0.01;
     this.steps = 1000000;
     this.globalStep = 0;
-
 
     this.gamma = gamma;
     this.batchSize = batchSize;
@@ -32,53 +30,94 @@ class ActorCriticModel {
     this.numHiddenLayers = numLayers;
 
     this.hiddenActivation = 'tanh';
+    this.regularizers = tf.regularizers.l2({ l2: 0.001 });
   }
-  save(location) {
-    this.actor.save(location + '/actor');
-    this.critic.save(location + '/critic');
+  async save(location) {
+    await this.actor.save(location + '/actor');
+    await this.critic.save(location + '/critic');
   }
   setBatchSize(n) {
     this.batchSize = n;
   };
-  createActorModel() {
+  createActorModel(useL2 = true) {
     const stateInput = tf.input({ shape: [this.numInputs] });
-  
-    let hidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateInput);
+
+    let hidden = tf.layers.dense({
+      units: this.hiddenUnits,
+      activation: this.hiddenActivation,
+      kernelInitializer: this.kernelInitializer,
+      kernelRegularizer: useL2 ? this.regularizers : null
+    }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      hidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(hidden);
+      hidden = tf.layers.dense({
+        units: this.hiddenUnits,
+        activation: this.hiddenActivation,
+        kernelInitializer: this.kernelInitializer,
+        kernelRegularizer: useL2 ? this.regularizers : null
+      }).apply(hidden);
     }
-  
-    const actions = tf.layers.dense({ units: numActions, activation: 'softmax', kernelInitializer: this.kernelInitializer }).apply(hidden);
-  
+
+    const actions = tf.layers.dense({
+      units: numActions,
+      activation: 'softmax',
+      kernelInitializer: this.kernelInitializer,
+      kernelRegularizer: useL2 ? this.regularizers : null
+    }).apply(hidden);
+
     const model = tf.model({ inputs: stateInput, outputs: actions });
-  
+
     const optimizer = tf.train.adam(this.initialLearningRate);
-  
+
     model.compile({ optimizer: optimizer, loss: 'categoricalCrossentropy' });
-  
+
     return model;
   }
 
-  createCriticModel() {
+  createCriticModel(useL2 = true) {
     const stateInput = tf.input({ shape: [this.numInputs] });
-    const actionInput = tf.input({ shape: [this.numActions] }); // Changed to match the number of discrete actions
-  
-    let stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateInput);
+    const actionInput = tf.input({ shape: [this.numActions] });
+
+    let stateHidden = tf.layers.dense({
+      units: this.hiddenUnits,
+      activation: this.hiddenActivation,
+      kernelInitializer: this.kernelInitializer,
+      kernelRegularizer: useL2 ? this.regularizers : null
+    }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      stateHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(stateHidden);
+      stateHidden = tf.layers.dense({
+        units: this.hiddenUnits,
+        activation: this.hiddenActivation,
+        kernelInitializer: this.kernelInitializer,
+        kernelRegularizer: useL2 ? this.regularizers : null
+      }).apply(stateHidden);
     }
-  
-    let actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(actionInput);
+
+    let actionHidden = tf.layers.dense({
+      units: this.hiddenUnits,
+      activation: this.hiddenActivation,
+      kernelInitializer: this.kernelInitializer,
+      kernelRegularizer: useL2 ? this.regularizers : null
+    }).apply(actionInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
-      actionHidden = tf.layers.dense({ units: this.hiddenUnits, activation: this.hiddenActivation, kernelInitializer: this.kernelInitializer }).apply(actionHidden);
+      actionHidden = tf.layers.dense({
+        units: this.hiddenUnits,
+        activation: this.hiddenActivation,
+        kernelInitializer: this.kernelInitializer,
+        kernelRegularizer: useL2 ? this.regularizers : null
+      }).apply(actionHidden);
     }
-  
+
     const merged = tf.layers.concatenate().apply([stateHidden, actionHidden]);
-    const output = tf.layers.dense({ units: 1, activation: 'linear', kernelInitializer: this.kernelInitializer }).apply(merged); // Changed to output a single value
-  
+    const output = tf.layers.dense({
+      units: 1,
+      activation: 'linear',
+      kernelInitializer: this.kernelInitializer,
+      kernelRegularizer: useL2 ? this.regularizers : null
+    }).apply(merged);
+
     const model = tf.model({ inputs: [stateInput, actionInput], outputs: output });
-    model.compile({ optimizer: 'adam', loss: 'meanSquaredError' }); // Changed to use a single loss function
-  
+    model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
+
     return model;
   }
 
@@ -88,31 +127,31 @@ class ActorCriticModel {
 
     // Ensure advantagesTensor is a rank 2 tensor
     if (advantagesTensor.rank === 1) {
-        advantagesTensor = advantagesTensor.expandDims(1);
+      advantagesTensor = advantagesTensor.expandDims(1);
     }
-      
+
     const actionsMax = actions.argMax(1);
     // Create a 2D tensor where the advantage is applied to the action with the maximum probability
     const actionsOneHot = tf.oneHot(actionsMax, this.numActions);
     advantagesTensor = advantagesTensor.mul(actionsOneHot);
 
     return await this.actor.trainOnBatch(statesTensor, advantagesTensor);
-}
-  
+  }
+
   async fitCritic(states, actions, qValues) {
     const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d([states]);
     const actionsTensor = actions instanceof tf.Tensor ? actions : tf.tensor2d([actions]);
     const qValuesTensor = qValues instanceof tf.Tensor ? qValues : tf.tensor2d([qValues]);
     return await this.critic.trainOnBatch([statesTensor, actionsTensor], qValuesTensor);
   }
-  
+
   predictActor(states) {
     return tf.tidy(() => {
       let statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d([states]);
       return this.actor.predict(statesTensor);
     });
   }
-  
+
   predictCritic(states, actions) {
     return tf.tidy(() => {
       const statesTensor = states instanceof tf.Tensor ? states : tf.tensor2d([states]);
@@ -134,9 +173,9 @@ class ActorCriticModel {
       this.priorities.shift();
     }
     const tdErrorValue = isNaN(tdError) ? tdError.dataSync()[0] : tdError;
-    if(actions.some(a => a>15) || actions.some(a => a < 0) || actions.length !== this.numActions)
+    if (actions.some(a => a > 15) || actions.some(a => a < 0) || actions.length !== this.numActions)
       console.error('actions contain values outside of [-1S,1] or is 0 length');
-    if(oldActions.some(a => a>15) || oldActions.some(a => a < 0) || oldActions.length !== this.numActions)
+    if (oldActions.some(a => a > 15) || oldActions.some(a => a < 0) || oldActions.length !== this.numActions)
       console.error('oldactions contain values outside of [-1S,1] or is 0 length');
     this.memory.push([state, oldActions, reward, nextState, actions, tdErrorValue]);
     const priority = Math.pow(Math.abs(tdErrorValue) + 1e-6, this.alpha);  // Prioritize experiences with higher error
@@ -175,22 +214,22 @@ class ActorCriticModel {
   async train() {
     const model = this;
     const [sample, sampleIndices] = model.sample(this.batchSize);
-  
+
     // Prepare batch data
     let batchOldStates = [];
     let batchActions = [];
     let batchRewardSignals = [];
     let batchNewStates = [];
-  
+
     for (let [oldStates, actions, rewardSignal, states] of sample) {
-      if(actions.length !== this.numActions)
-        console.error('actions is 0 length: sample'+ sample );
+      if (actions.length !== this.numActions)
+        console.error('actions is 0 length: sample' + sample);
       batchOldStates.push(oldStates);
       batchActions.push(actions);
       batchRewardSignals.push(rewardSignal);
       batchNewStates.push(states);
     }
-  
+
     // Convert to tensors
     const oldStatesTensor = tf.tensor(batchOldStates);
     const actionsTensor = tf.tensor(batchActions);
@@ -205,26 +244,28 @@ class ActorCriticModel {
     if (tf.any(tf.isNaN(rewardSignalsTensor)).dataSync()[0]) {
       console.error('rewardSignalsTensor contains NaN');
     }
-    if (tf.any(tf.isNaN(newStatesTensor )).dataSync()[0]) {
+    if (tf.any(tf.isNaN(newStatesTensor)).dataSync()[0]) {
       console.error('newStatesTensor  contains NaN');
     }
     const oldQValue = model.predictCritic(oldStatesTensor, actionsTensor);
-    if (tf.any(tf.isNaN( oldQValue)).dataSync()[0]) {
-      console.error('oldQValue contains NaN '+oldQValue.dataSync()[0]);
-      const weights = model.actor.getWeights();
-    const criticWeights = model.critic.getWeights();
-    const weightsData = weights.map(weight => weight.dataSync());
-    const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
 
-    $("#weights").text(weightsData);
-    $("#criticWeights").text(criticWeightsData);
-    console.error(criticWeightsData);
-    $("#current-state").text(states.join(', '));
+    if (tf.any(tf.isNaN(oldQValue)).dataSync()[0]) {
+      console.error('oldQValue contains NaN ' + oldQValue.dataSync()[0]);
+      const weights = model.actor.getWeights();
+      const criticWeights = model.critic.getWeights();
+      const weightsData = weights.map(weight => weight.dataSync());
+      const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
+
+      $("#weights").text(weightsData);
+      $("#criticWeights").text(criticWeightsData);
+      console.error(criticWeightsData);
+      $("#current-state").text(states.join(', '));
     }
+
     const newQValue = model.predictCritic(newStatesTensor, actionsTensor);
-    
-    if (tf.any(tf.isNaN( newQValue)).dataSync()[0]) {
-      console.error('newQValue  contains NaN '+oldQValue.dataSync()[0]);
+
+    if (tf.any(tf.isNaN(newQValue)).dataSync()[0]) {
+      console.error('newQValue  contains NaN ' + oldQValue.dataSync()[0]);
     }
     // Compute target Q-values
     const targetQValue = rewardSignalsTensor.add(newQValue.mul(this.gamma));
@@ -233,35 +274,33 @@ class ActorCriticModel {
     }
     // Update critic model
     const criticHistory = await model.fitCritic(oldStatesTensor, actionsTensor, targetQValue);
-  if(isNaN(criticHistory))
-    {
+    if (isNaN(criticHistory)) {
       const weights = model.actor.getWeights();
-    const criticWeights = model.critic.getWeights();
-    const weightsData = weights.map(weight => weight.dataSync());
-    const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
+      const criticWeights = model.critic.getWeights();
+      const weightsData = weights.map(weight => weight.dataSync());
+      const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
 
-    $("#weights").text(weightsData);
-    $("#criticWeights").text(criticWeightsData);
-    $("#current-state").text(states.join(', '));
+      $("#weights").text(weightsData);
+      $("#criticWeights").text(criticWeightsData);
+      $("#current-state").text(states.join(', '));
       console.error('criticHistory NaN');
     }
     // Update actor model
     const advantage = targetQValue.sub(newQValue);
     const actorHistory = await model.fitActor(oldStatesTensor, advantage, actionsTensor);
-  
+
     // Compute TD errors for each experience in the batch
     const qValueNextState = newQValue.reshape([this.batchSize]);
     const qValueCurrent = oldQValue.reshape([this.batchSize]);
     const tdErrors = rewardSignalsTensor.add(qValueNextState.mul(this.gamma)).sub(qValueCurrent);
-    
+
     const tdErrorsArray = tdErrors.dataSync();
-    if(tdErrorsArray.some(t => isNaN(t)))
-      {
-        console.error('tdErrors contains NaN');
-      }
+    if (tdErrorsArray.some(t => isNaN(t))) {
+      console.error('tdErrors contains NaN');
+    }
     for (let i = 0; i < sample.length; i++) {
       const tdError = tdErrorsArray[i];
-  
+
       // Update tdError and priority for existing experience
       if (this.memory[sampleIndices[i]]) {
         this.memory[sampleIndices[i]][5] = tdError;
@@ -294,10 +333,10 @@ let totalTurns = 0;
 const gamma = 0.6;  // Discount factor
 const numActions = 16;
 const numInputs = 91;
-const learningRate = 0.001;
+const learningRate = 0.005;
 const numHidden = 90;
 const batchSize = 264;
-const numLayers=2;
+const numLayers = 1;
 
 
 const model = new ActorCriticModel(learningRate, numLayers, numInputs, numActions, numHidden, gamma, batchSize);
@@ -527,11 +566,11 @@ function lineIntersectsSquare(lineStart, lineEnd, square) {
       let distance = Math.sqrt(dx * dx + dy * dy);
       if (distance < minDistance) {
         minDistance = distance;
-        closestIntersection = intersection; 
-        
+        closestIntersection = intersection;
+
       }
     }
-  } 
+  }
   return closestIntersection ? { ...closestIntersection, distance: minDistance } : false;
 }
 //karpathy collision code- psoibly replace with rayIntersect
@@ -663,7 +702,7 @@ Agent.prototype.getVision = () => {
     if (a.eyes.length === 0) continue;
     const pos = a.p;
     const angle = a.angle;
-    const agentRads = Math.atan2(angle.y,angle.x);
+    const agentRads = Math.atan2(angle.y, angle.x);
     if (isNaN(agentRads)) {
       console.error('agentRads is NaN');
     }
@@ -823,8 +862,8 @@ Agent.prototype.logic = async function (ctx, clock) {
         --seen[i].agent.currentHp;
 
         //tf ml reward
-        seen[i].agent.rewardSignal=seen[i].agent.rewardSignal-1;
-        negRewards = negRewards-1;
+        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 1;
+        negRewards = negRewards - 1;
 
         if (seen[i].agent.currentHp < 1) {
           seen[i].agent.isHuman = false;
@@ -853,7 +892,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     const agentType = seen[i].agent.type;
 
     if (this.isHuman === false) {
-      
+
       // attack human
       if (agentType === 'human') {
         this.state = 'attack';
@@ -883,14 +922,14 @@ Agent.prototype.logic = async function (ctx, clock) {
       console.log('got vision 1st time');
     }
     const predictedActionTensor = model.predictActor(states);
-    
+
     if (actions.length < 1) {
       const actionsOneHot = Array(numActions).fill(0);
-      actionsOneHot[numActions-1] = 1;
+      actionsOneHot[numActions - 1] = 1;
       actions = actionsOneHot;
       console.log('made fake actions shoot');
     }
-    
+
     // Perform action and get new state and reward
     oldActions = [...actions];
     oldStates = [...states];
@@ -904,25 +943,25 @@ Agent.prototype.logic = async function (ctx, clock) {
     let actionSelected;
     if (Math.random() < epsilon) {
       // Take a random action
-      actionSelected =  Math.floor(Math.random() * 16);
+      actionSelected = Math.floor(Math.random() * 16);
       const actionsOneHot = Array(numActions).fill(0);
       actionsOneHot[actionSelected] = 1;
-      actions = actionsOneHot; 
+      actions = actionsOneHot;
     } else {
-      actionSelected = tf.argMax(predictedActionTensor,1).dataSync()[0]; 
-      actions = predictedActionTensor.arraySync()[0];  
+      actionSelected = tf.argMax(predictedActionTensor, 1).dataSync()[0];
+      actions = predictedActionTensor.arraySync()[0];
     }
-    let newAngle =0;
-    if (actionSelected < (numActions -1)) {
-      const predictedActionVal = (actionSelected-((numActions/2) -1)) * (360/30) * oneRad;
+    let newAngle = 0;
+    if (actionSelected < (numActions - 1)) {
+      const predictedActionVal = (actionSelected - ((numActions / 2) - 1)) * (360 / 30) * oneRad;
       newAngle = predictedActionVal;
     } else {
       this.shoot(this, seen);
-    }  
+    }
     const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
     const newVec = unitOldDir.rotate(newAngle);
-    this.dir = newVec; 
-    if(actions.length !== 16)
+    this.dir = newVec;
+    if (actions.length !== 16)
       console.error('actions length is not 16');
   }
 
@@ -1000,10 +1039,10 @@ Agent.prototype.logic = async function (ctx, clock) {
     model.remember([oldStates, oldActions, this.rewardSignal, states, actions, 1]);
     if (totalTurns % batchSize === 0) {
       const [actorHistory, criticHistory, samples] = await model.train();
-      actorLossValues.push( actorHistory);
-      criticLossValues.push( criticHistory);
+      actorLossValues.push(actorHistory);
+      criticLossValues.push(criticHistory);
       if (totalTurns % (batchSize * 100) === 0) {
-        const saveResult = await model.save('indexeddb://zombie-ac-2layer-1');
+        const saveResult = await model.save('indexeddb://zombie-ac-1layer-2');
       }
       $("#samples").text(samples.length);
     }
@@ -1012,7 +1051,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     rewardOverTime.push(this.rewardSignal);
     $("#rewardTotal").text(totalRewards);
     $("#neg-rewards").text(negRewards);
-   
+
     this.rewardSignal = 0;
   }
 }
@@ -1080,8 +1119,8 @@ Agent.prototype.shoot = (agent, seen) => {
   else {
     // missed! purple line is missed shot. the agent did not move but shot nothing.
     // to do: for now, we disgourage it from stopping and missing.
-    agent.rewardSignal = agent.rewardSignal-.1;
-    negRewards= negRewards-.1;
+    agent.rewardSignal = agent.rewardSignal - .1;
+    negRewards = negRewards - .1;
     ctx.strokeStyle = 'purple';
     ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
   }
@@ -1201,7 +1240,7 @@ async function goTooFast() {
   await mainLoop();
   loopCount++;
 
-  if (loopCount <=1) {
+  if (loopCount <= 1) {
     const weights = model.actor.getWeights();
     const criticWeights = model.critic.getWeights();
     const weightsData = weights.map(weight => weight.dataSync());
@@ -1232,14 +1271,14 @@ async function goTooFast() {
       stroke: function () { },
       // Add any other methods you use
     };
-    
+
     await goTooFast();
   }
 }
 let lossesChart;
 async function createOrUpdateLossesChart() {
   const ctx = document.getElementById('losses-chart').getContext('2d');
-  if (!lossesChart){
+  if (!lossesChart) {
     lossesChart = new Chart(ctx, {
       type: 'line',
       data: {
@@ -1256,7 +1295,7 @@ async function createOrUpdateLossesChart() {
           backgroundColor: 'rgba(75, 192, 192, 0.2)',
           borderColor: 'rgba(75, 192, 192, 1)',
           borderWidth: 1
-        }, ]
+        },]
       },
       options: {
         scales: {
@@ -1331,7 +1370,7 @@ $(function () {
   $('#gameSpeed').change(function () {
     gameSpeed = $(this).val();
   }).val(gameSpeed);
-  
+
 
   $("#help").click(function () {
     $(this).hide();
