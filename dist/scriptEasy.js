@@ -3,6 +3,10 @@
 //tf.enableDebugMode();
 tf.setBackend('cpu');
 
+
+window.addEventListener('beforeunload', () => {
+  model.dispose();
+});
 class ActorCriticModel {
 
   constructor(learningRate, numLayers, numInputs, numActions, hiddenUnits, gamma, batchSize) {
@@ -32,13 +36,14 @@ class ActorCriticModel {
     this.hiddenActivation = 'tanh';
     this.regularizers = tf.regularizers.l2({ l2: 0.001 });
   }
+  dispose() {
+    this.actor.dispose();
+    this.critic.dispose();
+  }
   async save(location) {
     await this.actor.save(location + '/actor');
     await this.critic.save(location + '/critic');
   }
-  setBatchSize(n) {
-    this.batchSize = n;
-  };
   createActorModel(useL2 = true) {
     const stateInput = tf.input({ shape: [this.numInputs] });
 
@@ -665,7 +670,7 @@ function Agent(config) {
   };
 
   this.rad = 10;
-  this.speed = config.speed || this.type === 'human' ? 2 + Math.random() : 1 + Math.random();
+  this.speed = config.speed || this.type === 'human' ? 3 + Math.random() : 1 + Math.random();
   this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
   this.dir = randomAngle();
   this.newDir = clone(this.dir);
@@ -1042,7 +1047,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       actorLossValues.push(actorHistory);
       criticLossValues.push(criticHistory);
       if (totalTurns % (batchSize * 100) === 0) {
-        const saveResult = await model.save('indexeddb://zombie-ac-1layer-2');
+        const saveResult = await model.save('indexeddb://zombie-ac-1layer-2-reward-1');
       }
       $("#samples").text(samples.length);
     }
@@ -1097,7 +1102,7 @@ Agent.prototype.shoot = (agent, seen) => {
   ctx.strokeStyle = 'red';
   ctx.moveTo(agent.pos.x, agent.pos.y);
   if (closestBaddy) {
-    agent.rewardSignal += 10;
+    agent.rewardSignal += 1;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
     //closestBaddy.state = 'idle';
