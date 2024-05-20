@@ -33,8 +33,8 @@ class ActorCriticModel {
     this.initialLearningRate = learningRate;
     this.numHiddenLayers = numLayers;
 
-    this.hiddenActivation = 'tanh';
-    this.regularizers = tf.regularizers.l2({ l2: 0.001 });
+    this.hiddenActivation = 'elu';
+    this.regularizers = null;//tf.regularizers.l2({ l2: 0.001 });
   }
   dispose() {
     this.actor.dispose();
@@ -44,21 +44,21 @@ class ActorCriticModel {
     await this.actor.save(location + '/actor');
     await this.critic.save(location + '/critic');
   }
-  createActorModel(useL2 = true) {
+  createActorModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
 
     let hidden = tf.layers.dense({
       units: this.hiddenUnits,
       activation: this.hiddenActivation,
       kernelInitializer: this.kernelInitializer,
-      kernelRegularizer: useL2 ? this.regularizers : null
+      kernelRegularizer: this.regularizers
     }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
       hidden = tf.layers.dense({
         units: this.hiddenUnits,
         activation: this.hiddenActivation,
         kernelInitializer: this.kernelInitializer,
-        kernelRegularizer: useL2 ? this.regularizers : null
+        kernelRegularizer: this.regularizers
       }).apply(hidden);
     }
 
@@ -66,7 +66,7 @@ class ActorCriticModel {
       units: numActions,
       activation: 'softmax',
       kernelInitializer: this.kernelInitializer,
-      kernelRegularizer: useL2 ? this.regularizers : null
+      kernelRegularizer: this.regularizers
     }).apply(hidden);
 
     const model = tf.model({ inputs: stateInput, outputs: actions });
@@ -78,7 +78,7 @@ class ActorCriticModel {
     return model;
   }
 
-  createCriticModel(useL2 = true) {
+  createCriticModel() {
     const stateInput = tf.input({ shape: [this.numInputs] });
     const actionInput = tf.input({ shape: [this.numActions] });
 
@@ -86,14 +86,14 @@ class ActorCriticModel {
       units: this.hiddenUnits,
       activation: this.hiddenActivation,
       kernelInitializer: this.kernelInitializer,
-      kernelRegularizer: useL2 ? this.regularizers : null
+      kernelRegularizer: this.regularizers
     }).apply(stateInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
       stateHidden = tf.layers.dense({
         units: this.hiddenUnits,
         activation: this.hiddenActivation,
         kernelInitializer: this.kernelInitializer,
-        kernelRegularizer: useL2 ? this.regularizers : null
+        kernelRegularizer: this.regularizers
       }).apply(stateHidden);
     }
 
@@ -101,14 +101,14 @@ class ActorCriticModel {
       units: this.hiddenUnits,
       activation: this.hiddenActivation,
       kernelInitializer: this.kernelInitializer,
-      kernelRegularizer: useL2 ? this.regularizers : null
+      kernelRegularizer: this.regularizers
     }).apply(actionInput);
     for (let i = 1; i < this.numHiddenLayers; i++) {
       actionHidden = tf.layers.dense({
         units: this.hiddenUnits,
         activation: this.hiddenActivation,
         kernelInitializer: this.kernelInitializer,
-        kernelRegularizer: useL2 ? this.regularizers : null
+        kernelRegularizer: this.regularizers
       }).apply(actionHidden);
     }
 
@@ -117,7 +117,7 @@ class ActorCriticModel {
       units: 1,
       activation: 'linear',
       kernelInitializer: this.kernelInitializer,
-      kernelRegularizer: useL2 ? this.regularizers : null
+      kernelRegularizer: this.regularizers
     }).apply(merged);
 
     const model = tf.model({ inputs: [stateInput, actionInput], outputs: output });
@@ -335,11 +335,11 @@ let totalTurns = 0;
 
 // Hyperparameters
 
-const gamma = 0.6;  // Discount factor
+const gamma = 0.8;  // Discount factor
 const numActions = 16;
 const numInputs = 91;
 const learningRate = 0.005;
-const numHidden = 90;
+const numHidden = 128;
 const batchSize = 264;
 const numLayers = 1;
 
@@ -715,7 +715,7 @@ Agent.prototype.getVision = () => {
     for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
       var e = a.eyes[ei];
       const eangle = e.angle;
-      const currentEyeAnglePointing = eangle;//agentRads + eangle;
+      const currentEyeAnglePointing = agentRads + eangle;
       // we have a line from p to p->eyep
       var eyep = new Vec(pos.x + e.max_range * Math.sin(currentEyeAnglePointing),
         pos.y + e.max_range * Math.cos(currentEyeAnglePointing));
@@ -867,8 +867,8 @@ Agent.prototype.logic = async function (ctx, clock) {
         --seen[i].agent.currentHp;
 
         //tf ml reward
-        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 1;
-        negRewards = negRewards - 1;
+        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 2;
+        negRewards = negRewards - 2;
 
         if (seen[i].agent.currentHp < 1) {
           seen[i].agent.isHuman = false;
@@ -1047,7 +1047,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       actorLossValues.push(actorHistory);
       criticLossValues.push(criticHistory);
       if (totalTurns % (batchSize * 100) === 0) {
-        const saveResult = await model.save('indexeddb://zombie-ac-1layer-2-reward-1');
+        const saveResult = await model.save('indexeddb://zombie-ac-1layer-2-reward-1-rotate');
       }
       $("#samples").text(samples.length);
     }
