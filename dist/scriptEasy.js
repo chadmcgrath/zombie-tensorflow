@@ -332,23 +332,25 @@ let negRewards = 0;
 let totalRewards = 0;
 let rewardOverTime = [];
 let totalTurns = 0;
-
+let missedShots=0;
+let hitShotsBaddy=0;
 // Hyperparameters
 
 const gamma = 0.8;  // Discount factor
 const numActions = 16;
-const numInputs = 91;
-const learningRate = 0.005;
+const numInputs = 92;
+const learningRate =+$('#slider-lr').val();
 const numHidden = 128;
-const batchSize = 264;
+let batchSize =+$('#slider-batch').val();
 const numLayers = 1;
+let epsilon = .15;
 
 
 const model = new ActorCriticModel(learningRate, numLayers, numInputs, numActions, numHidden, gamma, batchSize);
 const eyeMaxRange = 1000;
 var oneRad = Math.PI / 180;
 var pi2 = Math.PI * 2;
-var gameSpeed = 5;
+var gameSpeed = 3;
 var EPS = 0.01;
 
 
@@ -625,6 +627,7 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
         res.type = it.type.isHuman ? 1 : -1; // store type of item
         res.vx = it.v.x; // velocty information
         res.vy = it.v.y;
+        res.agent = it;
         if (!minres) { minres = res; }
         else {
           if (res.ua < minres.ua) { minres = res; }
@@ -646,7 +649,7 @@ var Eye = function (angle) {
 function Agent(config) {
   this.id = config.id;
 
-  const maxHp = 50000000;
+  const maxHp = 1000000;
   const eyeCount = 30;
   this.eyes = [];
   this.rewardSignal = 0;
@@ -703,6 +706,7 @@ Agent.prototype.getVision = () => {
   let eyeStates = [];
   for (var i = 0, n = this.agents.length; i < n; i++) {
     var a = this.agents[i];
+    a.target = null;
     // zombies do not have eyes
     if (a.eyes.length === 0) continue;
     const pos = a.p;
@@ -724,7 +728,9 @@ Agent.prototype.getVision = () => {
       }
       var res = stuff_collide(a, eyep, true, true);
       if (res) {
-        // eye collided with wall
+        // eye collided with anything
+        if(ei ===0)
+          a.target=res.agent;
         e.sensed_proximity = res.up.dist_from(a.p);
         e.sensed_type = res.type;
         if ('vx' in res) {
@@ -751,15 +757,16 @@ Agent.prototype.getVision = () => {
       //if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
       if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
       if (ei === 0) ctx.strokeStyle = "blue";
-      ctx.beginPath();
-
-      ctx.moveTo(pos.x, pos.y);
-      const sr = e.sensed_proximity;
+     
       const eyeAngle = rightLeftAngle(currentEyeAnglePointing);
-      const lineToX = pos.x + sr * Math.sin(eyeAngle);
-      const lineToY = pos.y + sr * Math.cos(eyeAngle);
-      ctx.lineTo(lineToX, lineToY);
-      ctx.stroke();
+
+      //const sr = e.sensed_proximity;
+      //ctx.beginPath();
+      //ctx.moveTo(pos.x, pos.y);
+      // const lineToX = pos.x + sr * Math.sin(eyeAngle);
+      // const lineToY = pos.y + sr * Math.cos(eyeAngle);
+      // ctx.lineTo(lineToX, lineToY);
+      // ctx.stroke();
 
       let type = e.sensed_type;
       if (type === 'zombie')
@@ -856,6 +863,16 @@ Agent.prototype.see = function () {
 
 Agent.prototype.logic = async function (ctx, clock) {
 
+var batchValue = $('#slider-batch').val();
+var epsilonValue = $('#slider-epsilon').val();
+
+this.epsilon = +epsilonValue;
+batchSize = +batchValue;
+model.batchSize = +batchValue;
+// // Setters
+// $('#slider-batch').val(8); // replace 8 with the value you want to set
+// $('#slider-lr').val(0.01); // replace 0.01 with the value you want to set
+// $('#slider-epsilon').val(0.2); // replace 0.2 with the value you want to set
   this.op = this.pos;
   var seen = this.see();
 
@@ -892,8 +909,7 @@ Agent.prototype.logic = async function (ctx, clock) {
     this.state = 'idle';
 
   }
-  // eslint-disable-next-line no-redeclare
-  for (var i = 0, l = seen.length; i < l; i++) {
+  for (let i = 0, l = seen.length; i < l; i++) {
     const agentType = seen[i].agent.type;
 
     if (this.isHuman === false) {
@@ -924,6 +940,9 @@ Agent.prototype.logic = async function (ctx, clock) {
       states = [];
       states.push(...this.getVision());
       states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
+      const target = !this.target? 0 : this.target.isHuman ? 1 : -1;
+      
+      states.push(target);
       console.log('got vision 1st time');
     }
     const predictedActionTensor = model.predictActor(states);
@@ -941,8 +960,8 @@ Agent.prototype.logic = async function (ctx, clock) {
     states = [];
     states.push(...this.getVision());
     states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
-
-    let epsilon = .15;
+    const target = !this.target? 0 : this.target.isHuman ? 1 : -1;  
+    states.push(target);
 
     actions = [];
     let actionSelected;
@@ -961,6 +980,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       const predictedActionVal = (actionSelected - ((numActions / 2) - 1)) * (360 / 30) * oneRad;
       newAngle = predictedActionVal;
     } else {
+      isMoving = true;
       this.shoot(this, seen);
     }
     const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
@@ -983,7 +1003,7 @@ Agent.prototype.logic = async function (ctx, clock) {
   //   this.state = 'idle';
   // }
 
-  var speed = isMoving ? (this.speed) * 10 : 0;
+  var speed = isMoving && this.isHuman ? (this.speed) * 10 : 0;
 
   // get velociy
   var vx = this.dir.x * speed * clock.delta;
@@ -1060,52 +1080,30 @@ Agent.prototype.logic = async function (ctx, clock) {
     this.rewardSignal = 0;
   }
 }
-Agent.prototype.shoot = (agent, seen) => {
-  const shootAngle = .5;//rads
-
-  const baddies = agent.items.filter(item => item.isHuman === false && seen.some(seenItem => seenItem.agent.id === item.id));
-  const newDirNorm = normalize(agent.dir);
-
-  const baddiesInRange = baddies.filter(baddy => {
-    const baddyDir = { x: baddy.pos.x - agent.pos.x, y: baddy.pos.y - agent.pos.y };
-    const baddyDirNorm = normalize(baddyDir);
-
-    //  Calculate the dot product of the normalized vectors
-    const dotProduct = newDirNorm.x * baddyDirNorm.x + newDirNorm.y * baddyDirNorm.y;
-
-    // Check if the cosine of the angle is greater than the cosine of n radians
-    return dotProduct > Math.cos(shootAngle);
-  });
-
+Agent.prototype.shoot = (agent) => {
+  
   ctx.beginPath();
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 6;
   ctx.arc(agent.pos.x, agent.pos.y, 5, 0, 2 * Math.PI, false);
   ctx.fillStyle = 'red';
   ctx.fill();
 
-  // Find the closest baddy
-  let closestBaddy = null;
-  let minDistance = Infinity;
-  baddiesInRange.forEach(baddy => {
-    const dx = baddy.pos.x - agent.pos.x;
-    const dy = baddy.pos.y - agent.pos.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    if (distance < minDistance) {
-      minDistance = distance;
-      closestBaddy = baddy;
-    }
-  });
+  
 
   // Draw red line to the closest baddy
+
   ctx.beginPath();
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 6;
   ctx.strokeStyle = 'red';
   ctx.moveTo(agent.pos.x, agent.pos.y);
-  if (closestBaddy) {
+
+  const closestBaddy = agent.target;
+  if (closestBaddy && !closestBaddy.isHuman) {
     agent.rewardSignal += 1;
+    hitShotsBaddy +=1;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
-    //closestBaddy.state = 'idle';
+    closestBaddy.state = 'idle';
     if (closestBaddy.currentHp < 1)
 
       closestBaddy.ring = 10;
@@ -1124,8 +1122,9 @@ Agent.prototype.shoot = (agent, seen) => {
   else {
     // missed! purple line is missed shot. the agent did not move but shot nothing.
     // to do: for now, we disgourage it from stopping and missing.
-    agent.rewardSignal = agent.rewardSignal - .1;
-    negRewards = negRewards - .1;
+    //agent.rewardSignal = agent.rewardSignal - .1;
+    //negRewards = negRewards - .1;
+    missedShots +=1;
     ctx.strokeStyle = 'purple';
     ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
   }
@@ -1135,7 +1134,7 @@ Agent.prototype.shoot = (agent, seen) => {
 Agent.prototype.draw = function (ctx) {
 
   ctx.beginPath();
-  ctx.arc(this.pos.x, this.pos.y, 5, 0, pi2, false);
+  ctx.arc(this.pos.x, this.pos.y, this.rad, 0, pi2, false);
   ctx.fillStyle = this.getColor();
   ctx.fill();
   ctx.lineWidth = 2;
@@ -1233,7 +1232,8 @@ async function mainLoop(time) {
   ctx.strokeStyle = '#FFFFFF';
   ctx.stroke();
   totalTurns++;
-
+  $("#hit-shots-baddy").text(hitShotsBaddy);
+  $("#missed-shots").text(missedShots);
   $("#turns").text(totalTurns);
 }
 let isRunning = false;
@@ -1381,7 +1381,7 @@ $(function () {
     $(this).hide();
   });
   const windowArea = $(window).width() * $(window).height();
-  const blockNum = 0;//windowArea / 50000;
+  const blockNum =0;// windowArea / 50000;
   for (let i = 0, l = blockNum; i < l; i++) {
     blocks.push(new Square({}));
   }
