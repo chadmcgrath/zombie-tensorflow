@@ -28,7 +28,6 @@ class ActorCriticModel {
 
     this.gamma = gamma;
     this.batchSize = batchSize;
-    this.numOutputs = 2;
     this.kernelInitializer = tf.initializers.glorotNormal();
     this.initialLearningRate = learningRate;
     this.numHiddenLayers = numLayers;
@@ -332,16 +331,17 @@ let negRewards = 0;
 let totalRewards = 0;
 let rewardOverTime = [];
 let totalTurns = 0;
-let missedShots=0;
-let hitShotsBaddy=0;
+let missedShots = 0;
+let hitShotsBaddy = 0;
+let currentBlueEye = 0;
 // Hyperparameters
 
 const gamma = 0.8;  // Discount factor
 const numActions = 16;
 const numInputs = 92;
-const learningRate =+$('#slider-lr').val();
+const learningRate = +$('#slider-lr').val();
 const numHidden = 128;
-let batchSize =+$('#slider-batch').val();
+let batchSize = +$('#slider-batch').val();
 const numLayers = 1;
 let epsilon = .15;
 
@@ -534,6 +534,7 @@ function line_intersect(line1Start, line1End, line2Start, line2End) {
   return { ua, ub, up: new Vec(x, y) };
 }
 var line_point_intersect = function (p1, p2, p0, rad) {
+  p0 = new Vec(p0.x, p0.y);
   var v = new Vec(p2.y - p1.y, -(p2.x - p1.x)); // perpendicular vector
   var d = Math.abs((p2.x - p1.x) * (p1.y - p0.y) - (p1.x - p0.x) * (p2.y - p1.y));
   d = d / v.length();
@@ -542,6 +543,9 @@ var line_point_intersect = function (p1, p2, p0, rad) {
   v.normalize();
   v.scale(d);
   var up = p0.add(v);
+  if (!up) {
+    console.log("up empty")
+  }
   if (Math.abs(p2.x - p1.x) > Math.abs(p2.y - p1.y)) {
     var ua = (up.x - p1.x) / (p2.x - p1.x);
   } else {
@@ -584,6 +588,7 @@ function lineIntersectsSquare(lineStart, lineEnd, square) {
 // this doesn't handle buildings properly cuz the origina code din't need to.
 const stuff_collide = (agent, p2, check_walls, check_items) => {
   var minres = false;
+  p2 = new Vec(p2.x, p2.y);
   const p1 = agent.p;
   // collide with walls
   if (check_walls) {
@@ -624,9 +629,10 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
       var it = agent.items[i];
       var res = line_point_intersect(p1, p2, it.p, it.rad);
       if (res) {
-        res.type = it.type.isHuman ? 1 : -1; // store type of item
         res.vx = it.v.x; // velocty information
         res.vy = it.v.y;
+
+        res.type = it.type.isHuman ? 1 : -1; // store type of item
         res.agent = it;
         if (!minres) { minres = res; }
         else {
@@ -664,15 +670,13 @@ function Agent(config) {
   this.currentHp = maxHp;
   this.items = [];
 
-
-
   this.type = config.type || 'human';
   this.pos = config.pos || {
     x: 0,
     y: 0
   };
 
-  this.rad = 10;
+  this.rad = 20;
   this.speed = config.speed || this.type === 'human' ? 3 + Math.random() : 1 + Math.random();
   this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
   this.dir = randomAngle();
@@ -681,7 +685,7 @@ function Agent(config) {
   //todo: remove duplicate position
   Object.defineProperty(this, 'angle', {
     get: function () {
-      return this.dir;
+      return new Vec(this.dir.x, this.dir.y);
     }
   });
   Object.defineProperty(this, 'p', {
@@ -704,33 +708,48 @@ function Agent(config) {
 Agent.prototype.getVision = () => {
 
   let eyeStates = [];
-  for (var i = 0, n = this.agents.length; i < n; i++) {
+  for (let i = 0, n = this.agents.length; i < n; i++) {
     var a = this.agents[i];
     a.target = null;
     // zombies do not have eyes
     if (a.eyes.length === 0) continue;
     const pos = a.p;
     const angle = a.angle;
-    const agentRads = Math.atan2(angle.y, angle.x);
-    if (isNaN(agentRads)) {
-      console.error('agentRads is NaN');
-    }
+    
+
 
     for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
       var e = a.eyes[ei];
       const eangle = e.angle;
-      const currentEyeAnglePointing = agentRads + eangle;
+      const currentEyeAnglePointing = angle.rotate(eangle).getUnit();
       // we have a line from p to p->eyep
-      var eyep = new Vec(pos.x + e.max_range * Math.sin(currentEyeAnglePointing),
-        pos.y + e.max_range * Math.cos(currentEyeAnglePointing));
+      var eyep = new Vec(pos.x + e.max_range * currentEyeAnglePointing.x,
+        pos.y + e.max_range * currentEyeAnglePointing.y);
+
       if (isNaN(eyep.x)) {
         console.error('eyep.x is NaN');
       }
+
       var res = stuff_collide(a, eyep, true, true);
       if (res) {
         // eye collided with anything
-        if(ei ===0)
-          a.target=res.agent;
+        if (ei === 0) {
+          let isCollisonMain = false;
+          const p1 = new Vec(a.pos.x, a.pos.y);
+            const p2 = new Vec(a.pos.x + a.dir.x * eyeMaxRange, a.pos.y + a.dir.y * eyeMaxRange);
+          for (let i = 0, n = a.items.length; i < n; i++) {
+            var it = a.items[i];
+            
+            var res2 = line_point_intersect(p1, p2, it.p, it.rad);
+            isCollisonMain = res2;
+          }
+          a.target = res.agent;
+          if (isCollisonMain !== false && !res.agent) {
+            console.error("what up");
+            var res3 = stuff_collide(a, eyep, true, true);
+          }
+        }
+
         e.sensed_proximity = res.up.dist_from(a.p);
         e.sensed_type = res.type;
         if ('vx' in res) {
@@ -756,17 +775,19 @@ Agent.prototype.getVision = () => {
       if (e.sensed_type === 1) { ctx.strokeStyle = "rgb(255,150,150)"; } // human
       //if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
       if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
-      if (ei === 0) ctx.strokeStyle = "blue";
-     
-      const eyeAngle = rightLeftAngle(currentEyeAnglePointing);
+      if (ei === 0) {
+        ctx.strokeStyle = "blue";
+        currentBlueEye = currentEyeAnglePointing;
+        $('#blue-eye').text(currentEyeAnglePointing);
+      }
 
-      //const sr = e.sensed_proximity;
-      //ctx.beginPath();
-      //ctx.moveTo(pos.x, pos.y);
-      // const lineToX = pos.x + sr * Math.sin(eyeAngle);
-      // const lineToY = pos.y + sr * Math.cos(eyeAngle);
-      // ctx.lineTo(lineToX, lineToY);
-      // ctx.stroke();
+      const sr = e.sensed_proximity;
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      const lineToX = pos.x + sr * currentEyeAnglePointing.x;
+      const lineToY = pos.y + sr * currentEyeAnglePointing.y;
+      ctx.lineTo(lineToX, lineToY);
+      ctx.stroke();
 
       let type = e.sensed_type;
       if (type === 'zombie')
@@ -778,18 +799,13 @@ Agent.prototype.getVision = () => {
       // closeness of proximity is probably easier to process than distance
       const closeness = 1 - e.sensed_proximity / e.max_range
       // tensorflow inputs
-      eyeStates.push(eyeAngle / Math.PI, closeness, type);
+      eyeStates.push(Math.atan2(currentEyeAnglePointing.y, currentEyeAnglePointing.x) / Math.PI, closeness, type);
     }
   }
   // tensorflow inputs
   return eyeStates;
 }
-// converts to bewett - Pi and Pi
-function rightLeftAngle(d) {
-  while (d < -Math.PI) d += 2 * Math.PI;
-  while (d >= Math.PI) d -= 2 * Math.PI;
-  return d;
-}
+
 Agent.prototype.getColor = function () {
   if (this.state === 'mouse') return '#FF00FF';
   if (this.state === 'panic') return 'yellow';
@@ -863,16 +879,16 @@ Agent.prototype.see = function () {
 
 Agent.prototype.logic = async function (ctx, clock) {
 
-var batchValue = $('#slider-batch').val();
-var epsilonValue = $('#slider-epsilon').val();
+  var batchValue = $('#slider-batch').val();
+  var epsilonValue = $('#slider-epsilon').val();
 
-this.epsilon = +epsilonValue;
-batchSize = +batchValue;
-model.batchSize = +batchValue;
-// // Setters
-// $('#slider-batch').val(8); // replace 8 with the value you want to set
-// $('#slider-lr').val(0.01); // replace 0.01 with the value you want to set
-// $('#slider-epsilon').val(0.2); // replace 0.2 with the value you want to set
+  this.epsilon = +epsilonValue;
+  batchSize = +batchValue;
+  model.batchSize = +batchValue;
+  // // Setters
+  // $('#slider-batch').val(8); // replace 8 with the value you want to set
+  // $('#slider-lr').val(0.01); // replace 0.01 with the value you want to set
+  // $('#slider-epsilon').val(0.2); // replace 0.2 with the value you want to set
   this.op = this.pos;
   var seen = this.see();
 
@@ -940,8 +956,8 @@ model.batchSize = +batchValue;
       states = [];
       states.push(...this.getVision());
       states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
-      const target = !this.target? 0 : this.target.isHuman ? 1 : -1;
-      
+      const target = !this.target ? 0 : this.target.isHuman ? 1 : -1;
+
       states.push(target);
       console.log('got vision 1st time');
     }
@@ -960,7 +976,7 @@ model.batchSize = +batchValue;
     states = [];
     states.push(...this.getVision());
     states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
-    const target = !this.target? 0 : this.target.isHuman ? 1 : -1;  
+    const target = !this.target ? 0 : this.target.isHuman ? 1 : -1;
     states.push(target);
 
     actions = [];
@@ -980,8 +996,8 @@ model.batchSize = +batchValue;
       const predictedActionVal = (actionSelected - ((numActions / 2) - 1)) * (360 / 30) * oneRad;
       newAngle = predictedActionVal;
     } else {
-      isMoving = true;
-      this.shoot(this, seen);
+      isMoving = false;
+      this.shoot(this);
     }
     const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
     const newVec = unitOldDir.rotate(newAngle);
@@ -1081,26 +1097,19 @@ model.batchSize = +batchValue;
   }
 }
 Agent.prototype.shoot = (agent) => {
-  
-  ctx.beginPath();
-  ctx.lineWidth = 6;
-  ctx.arc(agent.pos.x, agent.pos.y, 5, 0, 2 * Math.PI, false);
-  ctx.fillStyle = 'red';
-  ctx.fill();
-
-  
 
   // Draw red line to the closest baddy
 
   ctx.beginPath();
   ctx.lineWidth = 6;
-  ctx.strokeStyle = 'red';
+
   ctx.moveTo(agent.pos.x, agent.pos.y);
 
   const closestBaddy = agent.target;
-  if (closestBaddy && !closestBaddy.isHuman) {
+  if (closestBaddy) {
+    ctx.strokeStyle = 'red';
     agent.rewardSignal += 1;
-    hitShotsBaddy +=1;
+    hitShotsBaddy += 1;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
     closestBaddy.state = 'idle';
@@ -1120,13 +1129,15 @@ Agent.prototype.shoot = (agent) => {
     }
   }
   else {
+
     // missed! purple line is missed shot. the agent did not move but shot nothing.
     // to do: for now, we disgourage it from stopping and missing.
     //agent.rewardSignal = agent.rewardSignal - .1;
     //negRewards = negRewards - .1;
-    missedShots +=1;
+    missedShots += 1;
     ctx.strokeStyle = 'purple';
     ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
+    // check if hits any agent items
   }
   ctx.stroke();
 
@@ -1155,10 +1166,11 @@ Agent.prototype.draw = function (ctx) {
   // ctx.closePath();
   // ctx.lineWidth = 1;
   // ctx.stroke();
-  var dir = project(this.pos, this.dir, 10);
+  var dir = new Vec(this.dir.x, this.dir.y);
+
   ctx.beginPath();
   ctx.moveTo(this.pos.x, this.pos.y);
-  ctx.lineTo(dir.x, dir.y);
+  ctx.lineTo(this.pos.x + dir.x * this.rad, this.pos.y + dir.y * this.rad);
   ctx.strokeStyle = '#00FFFF';
   ctx.stroke();
   if (this.intersect) {
@@ -1381,7 +1393,7 @@ $(function () {
     $(this).hide();
   });
   const windowArea = $(window).width() * $(window).height();
-  const blockNum =0;// windowArea / 50000;
+  const blockNum = 0;// windowArea / 50000;
   for (let i = 0, l = blockNum; i < l; i++) {
     blocks.push(new Square({}));
   }
