@@ -28,11 +28,11 @@ class ActorCriticModel {
 
     this.gamma = gamma;
     this.batchSize = batchSize;
-    this.kernelInitializer = tf.initializers.glorotNormal();
+    this.kernelInitializer = tf.initializers.heNormal();
     this.initialLearningRate = learningRate;
     this.numHiddenLayers = numLayers;
 
-    this.hiddenActivation = 'elu';
+    this.hiddenActivation = 'relu';
     this.regularizers = null;//tf.regularizers.l2({ l2: 0.001 });
   }
   dispose() {
@@ -333,14 +333,13 @@ let rewardOverTime = [];
 let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
-let currentBlueEye = 0;
 // Hyperparameters
 
-const gamma = 0.8;  // Discount factor
+const gamma = 0.1;  // Discount factor
 const numActions = 16;
-const numInputs = 92;
-const learningRate = +$('#slider-lr').val();
-const numHidden = 128;
+const numInputs = 91;
+const learningRate = .0003;//+$('#slider-lr').val();
+const numHidden = 90;
 let batchSize = +$('#slider-batch').val();
 const numLayers = 1;
 let epsilon = .15;
@@ -777,7 +776,6 @@ Agent.prototype.getVision = () => {
       if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
       if (ei === 0) {
         ctx.strokeStyle = "blue";
-        currentBlueEye = currentEyeAnglePointing;
         $('#blue-eye').text(currentEyeAnglePointing);
       }
 
@@ -796,10 +794,8 @@ Agent.prototype.getVision = () => {
         type = 1;
 
       // add to state for ML
-      // closeness of proximity is probably easier to process than distance
-      const closeness = 1 - e.sensed_proximity / e.max_range
       // tensorflow inputs
-      eyeStates.push(Math.atan2(currentEyeAnglePointing.y, currentEyeAnglePointing.x) / Math.PI, closeness, type);
+      eyeStates.push(sr *currentEyeAnglePointing.x/e.max_range, sr *currentEyeAnglePointing.y/e.max_range, type);
     }
   }
   // tensorflow inputs
@@ -900,8 +896,8 @@ Agent.prototype.logic = async function (ctx, clock) {
         --seen[i].agent.currentHp;
 
         //tf ml reward
-        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 2;
-        negRewards = negRewards - 2;
+        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 1;
+        negRewards = negRewards - 1;
 
         if (seen[i].agent.currentHp < 1) {
           seen[i].agent.isHuman = false;
@@ -955,7 +951,6 @@ Agent.prototype.logic = async function (ctx, clock) {
     if (states.length < 1) {
       states = [];
       states.push(...this.getVision());
-      states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
       const target = !this.target ? 0 : this.target.isHuman ? 1 : -1;
 
       states.push(target);
@@ -965,7 +960,7 @@ Agent.prototype.logic = async function (ctx, clock) {
 
     if (actions.length < 1) {
       const actionsOneHot = Array(numActions).fill(0);
-      actionsOneHot[numActions - 1] = 1;
+      actionsOneHot[numActions/2] = 1;
       actions = actionsOneHot;
       console.log('made fake actions shoot');
     }
@@ -975,7 +970,6 @@ Agent.prototype.logic = async function (ctx, clock) {
     oldStates = [...states];
     states = [];
     states.push(...this.getVision());
-    states.push(Math.atan2(this.angle.y, this.angle.x) / Math.PI);
     const target = !this.target ? 0 : this.target.isHuman ? 1 : -1;
     states.push(target);
 
@@ -999,6 +993,7 @@ Agent.prototype.logic = async function (ctx, clock) {
       isMoving = false;
       this.shoot(this);
     }
+    
     const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
     const newVec = unitOldDir.rotate(newAngle);
     this.dir = newVec;
@@ -1108,7 +1103,7 @@ Agent.prototype.shoot = (agent) => {
   const closestBaddy = agent.target;
   if (closestBaddy) {
     ctx.strokeStyle = 'red';
-    agent.rewardSignal += 1;
+    agent.rewardSignal += 10;
     hitShotsBaddy += 1;
     ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
     closestBaddy.currentHp--;
