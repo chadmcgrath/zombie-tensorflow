@@ -10,7 +10,7 @@ window.addEventListener('beforeunload', () => {
 class ActorCriticModel {
 
   constructor(learningRate, numLayers, numInputs, numActions, hiddenUnits, gamma, batchSize) {
-    this.maxMemorySize = 5000;
+    this.maxMemorySize = 10000;
     this.numInputs = numInputs;
     this.numActions = numActions;
     this.hiddenUnits = hiddenUnits;
@@ -32,8 +32,8 @@ class ActorCriticModel {
     this.initialLearningRate = learningRate;
     this.numHiddenLayers = numLayers;
 
-    this.hiddenActivation = 'relu';
-    this.regularizers = null;//tf.regularizers.l2({ l2: 0.001 });
+    this.hiddenActivation = 'elu';
+    this.regularizers = tf.regularizers.l2({ l2: 0.001 });
   }
   dispose() {
     this.actor.dispose();
@@ -341,7 +341,7 @@ const numInputs = 91;
 const learningRate = .0003;//+$('#slider-lr').val();
 const numHidden = 90;
 let batchSize = +$('#slider-batch').val();
-const numLayers = 1;
+const numLayers = 2;
 let epsilon = .15;
 
 
@@ -591,6 +591,7 @@ const stuff_collide = (agent, p2, check_walls, check_items) => {
   const p1 = agent.p;
   // collide with walls
   if (check_walls) {
+    
     const windowWalls = {
       bounds: [{ x: 0, y: 0, width: window.innerWidth, height: 0 }, // top    
       { x: window.innerWidth, y: window.innerHeight, width: 0, height: window.innerHeight }]
@@ -891,13 +892,13 @@ Agent.prototype.logic = async function (ctx, clock) {
   // convert humans to zombie
   if (this.type === 'zombie' && seen.length) {
     for (var i = 0, l = seen.length; i < l; i++) {
-      if (seen[i].agent.isHuman === true && seen[i].dist < 10) {
+      if (seen[i].agent.isHuman === true && seen[i].dist < this.rad) {
         // change to remove a hitpoint
         --seen[i].agent.currentHp;
 
         //tf ml reward
-        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 1;
-        negRewards = negRewards - 1;
+        seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - 10;
+        negRewards = negRewards - 10;
 
         if (seen[i].agent.currentHp < 1) {
           seen[i].agent.isHuman = false;
@@ -1028,8 +1029,8 @@ Agent.prototype.logic = async function (ctx, clock) {
     if (this.intersect = blocks[i].rayIntersect(this.pos, this.dir)) {
       if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
         this.pos = this.intersect[0].pos;
-        this.rewardSignal = this.rewardSignal - .1;
-        negRewards = negRewards - .1;
+        this.rewardSignal = this.rewardSignal - 1;
+        negRewards = negRewards - 1;
         //this.newDir = this.intersect[0].n;
         this.dir = randomAngle();
         break;
@@ -1042,30 +1043,31 @@ Agent.prototype.logic = async function (ctx, clock) {
   }
 
   // if we hit a wall turn arround
+  // bouncing it by 50 might be kinda high but i don't want 0 magnitude inputs for the eyes x, y
   var bound = false;
   if (this.pos.x < 0) {
-    this.pos.x = 0;
+    this.pos.x = 50;
     this.dir.x = 1;
     bound = true
   }
   if (this.pos.y < 0) {
-    this.pos.y = 0;
+    this.pos.y = 50;
     this.dir.y = 1;
     bound = true;
   }
   if (this.pos.x > ctx.canvas.width) {
-    this.pos.x = ctx.canvas.width;
+    this.pos.x = ctx.canvas.width-50;
     this.dir.x = -1;
     bound = true;
   }
   if (this.pos.y > ctx.canvas.height) {
-    this.pos.y = ctx.canvas.height;
+    this.pos.y = ctx.canvas.height-50;
     this.dir.y = -1;
     bound = true;
   }
   if (bound) {
-    this.rewardSignal = this.rewardSignal - .1;
-    negRewards = negRewards - .1;
+    this.rewardSignal = this.rewardSignal - 1;
+    negRewards = negRewards - 1;
     normalize(this.dir);
   }
 
@@ -1127,8 +1129,8 @@ Agent.prototype.shoot = (agent) => {
 
     // missed! purple line is missed shot. the agent did not move but shot nothing.
     // to do: for now, we disgourage it from stopping and missing.
-    //agent.rewardSignal = agent.rewardSignal - .1;
-    //negRewards = negRewards - .1;
+    agent.rewardSignal = agent.rewardSignal - .5;
+    negRewards = negRewards - .5;
     missedShots += 1;
     ctx.strokeStyle = 'purple';
     ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
