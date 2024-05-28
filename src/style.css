@@ -2,16 +2,14 @@ body {
   background: black;
   padding:0;
   margin:0;
-  overflow:hidden;
 }
 
 #canvas {
   border:0;
 }
 
-#gameSpeed {
-  position:absolute;
-  bottom:0;
+.flex-container {
+  display: flex;
 }
 
 #help {
