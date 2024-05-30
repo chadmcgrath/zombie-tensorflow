@@ -1187,7 +1187,7 @@ async function goTooFast() {
       loopCount = 0;
     //if(!ctx.isDummy)
     ctx = canvas.getContext('2d');
-    requestAnimationFrame(goTooFast);
+    requestAnimationFrame(async () => await goTooFast());
   } else if (continueLoop) {
     // don't draw. just keep going and trian the model
     ctx = {
@@ -1201,6 +1201,13 @@ async function goTooFast() {
     
     await goTooFast();
   }
+}
+function requestAnimationFrameAsync(func) {
+  return new Promise((resolve) => {
+      requestAnimationFrame((time) => {
+          resolve(func(time));
+      });
+  });
 }
 let lossesChart;
 async function createOrUpdateLossesChart() {
@@ -1297,7 +1304,7 @@ async function createOrUpdateRewardChart(rewardOverTime, batchSize) {
 }
 
 
-goTooFast();
+
 //////////////////////////////////////
 
 window.addEventListener('keydown', (event) => {
@@ -1339,5 +1346,6 @@ $(function () {
     h.items = agents.filter(a => a.id !== h.id);
     h.viewDist = 1000;
   });
+  goTooFast();
 
 })

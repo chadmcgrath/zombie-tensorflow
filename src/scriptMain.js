@@ -1,7 +1,10 @@
-/* global tf */
+
 /* global $ */
 /* global Chart */
+/* global PPO */
 //tf.enableDebugMode();
+
+/* global tf */
 tf.setBackend('cpu');
 
 
@@ -16,13 +19,14 @@ let rewardOverTime = [];
 let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
+let hitShotsHuman = 0;
 // Hyperparameters
 
 
 const numActions = 16;
 
 let batchSize = +$('#slider-batch').val();
-let epsilon = 0;
+let epsilonGreedy = 0;
 const baseReward = 1;
 const eyeMaxRange = 1000;
 var oneRad = Math.PI / 180;
@@ -262,7 +266,7 @@ function lineIntersectsSquare(lineStart, lineEnd, square) {
     return closestIntersection ? { ...closestIntersection, distance: minDistance } : false;
 }
 //karpathy collision code- psoibly replace with rayIntersect
-// this doesn't handle buildings properly cuz the origina code din't need to.
+// the original didn't handle buildings properly cuz the original code didn't need to.
 const stuff_collide = (agent, p2, check_walls, check_items) => {
     var minres = false;
     p2 = new Vec(p2.x, p2.y);
@@ -371,13 +375,11 @@ function Agent(config) {
             return new Vec(this.pos.x, this.pos.y);
         }
     });
-    this.oangle = 0;
-    this.op = this.pos;// old position
     this.v = new Vec(0, 0);
     //
     this.state = config.state || 'idle';
     this.viewDist = config.viewDist || 1000;
-    this.viewFov = (config.viewFov || this.type === 'human' ? 90 : 45) * oneRad;
+    this.viewFov = (config.viewFov || this.type === 'human' ? 90 : 90) * oneRad;
     this.viewFovD2 = this.viewFov / 2;
     this.nextTimer = Math.random() * 10;
     this.ring = config.ring || this.type === 'human' ? 0 : 5;
@@ -393,9 +395,6 @@ Agent.prototype.getVision = () => {
         if (a.eyes.length === 0) continue;
         const pos = a.p;
         const angle = a.angle;
-
-
-
         for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
             var e = a.eyes[ei];
             const eangle = e.angle;
@@ -411,7 +410,10 @@ Agent.prototype.getVision = () => {
             var res = stuff_collide(a, eyep, true, true);
             if (res) {
                 // eye collided with anything
-                if (ei === 0) {
+                if(ei===0)
+                    a.target = res.agent;
+                // this is to check for an intermittent bug
+                if (ei === 0 && !res.agent) {
                     let isCollisonMain = false;
                     const p1 = new Vec(a.pos.x, a.pos.y);
                     const p2 = new Vec(a.pos.x + a.dir.x * eyeMaxRange, a.pos.y + a.dir.y * eyeMaxRange);
@@ -421,11 +423,11 @@ Agent.prototype.getVision = () => {
                         var res2 = line_point_intersect(p1, p2, it.p, it.rad);
                         isCollisonMain = res2;
                     }
-                    a.target = res.agent;
+
                     if (isCollisonMain !== false && !res.agent) {
-                        console.error("what up");
-                        // eslint-disable-next-line no-unused-vars
-                        var res3 = stuff_collide(a, eyep, true, true);
+                        console.error("it seems a wall got in the way of the agent's vision when it should not have.");
+                        //// eslint-disable-next-line no-unused-vars
+                        //var res3 = stuff_collide(a, eyep, true, true);
                     }
                 }
 
@@ -554,31 +556,37 @@ Agent.prototype.see = function () {
 }
 
 Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
-
+    let isMoving = true;
     var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
 
-    epsilon = +epsilonValue;
+    epsilonGreedy = +epsilonValue;
     batchSize = +batchValue;
     // // Setters
     // $('#slider-batch').val(8); // replace 8 with the value you want to set
     // $('#slider-lr').val(0.01); // replace 0.01 with the value you want to set
     // $('#slider-epsilon').val(0.2); // replace 0.2 with the value you want to set
-    this.op = this.pos;
-    var seen = this.see();
+    const seen = this.see();
 
-    // convert humans to zombie
-    if (this.type === 'zombie' && seen.length) {
-        for (var i = 0, l = seen.length; i < l; i++) {
+    // bite and maybe convert humans to zombie
+    if (this.isHuman === false) {
+        if (seen.some(s => s.agent.isHuman) === false) {
+            this.state = 'idle';
+            this.nextTimer = 3 + Math.random() * 10;
+            this.newDir = randomAngle();
+            this.state = 'idle';
+        }
+        for (let i = 0, l = seen.length; i < l; i++) {
             if (seen[i].agent.isHuman === true && seen[i].dist < this.rad) {
                 // change to remove a hitpoint
                 --seen[i].agent.currentHp;
 
                 //tf ml reward
-                seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward;
-                negRewards = negRewards - baseReward;
+                seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward *4;
+                negRewards = negRewards - baseReward * 4;
 
                 if (seen[i].agent.currentHp < 1) {
+                    console.log('zombifying human' + seen[i].agent.id);
                     seen[i].agent.isHuman = false;
                     seen[i].agent.eyes = [];
                     seen[i].agent.type = this.type;
@@ -590,20 +598,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                     seen[i].agent.ring = 1;
                 }
             }
-        }
-    }
-
-    let isMoving = true;
-    if (this.isHuman === false && seen.some(s => s.agent.isHuman) === false) {
-        this.nextTimer = 3 + Math.random() * 10;
-        this.newDir = randomAngle();
-        this.state = 'idle';
-
-    }
-    for (let i = 0, l = seen.length; i < l; i++) {
-        const agentType = seen[i].agent.type;
-
-        if (this.isHuman === false) {
+            const agentType = seen[i].agent.type;
 
             // attack human
             if (agentType === 'human') {
@@ -620,7 +615,8 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                 this.dir = seen[i].angle;
             }
         }
-    }   // for i in seen
+    }
+
     if (this.isHuman) {
         this.state = 'panic';
         this.nextTimer = 5;
@@ -634,9 +630,6 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             states.push(target);
             console.log('got vision 1st time');
         }
-        //const predictedActionTensor = model.predictActor(states);
-
-        
 
         // Perform action and get new state and reward
         states = [];
@@ -645,14 +638,13 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         states.push(target);
 
         let actionSelected;
-        if (Math.random() < epsilon) {
+        if (Math.random() < epsilonGreedy) {
             // Take a random action
             actionSelected = Math.floor(Math.random() * 16);
             const actionsOneHot = Array(numActions).fill(.1);
             actionsOneHot[actionSelected] = .85;
         } else {
-            actionSelected = action;//tf.argMax(predictedActionTensor, 1).dataSync()[0];
-            //actions = predictedActionTensor.arraySync()[0];
+            actionSelected = action;
         }
         let newAngle = 0;
         if (actionSelected < (numActions - 1)) {
@@ -666,7 +658,6 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
         const newVec = unitOldDir.rotate(newAngle);
         this.dir = newVec;
-        
     }
 
 
@@ -675,12 +666,6 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         if (this.ring > 100) this.ring = 0;
     }
     this.nextTimer -= clock.delta;
-    // //zombies when timer runs out go back to random wandering
-    // if (this.isHuman === false && this.nextTimer <= 0) {
-    //   this.nextTimer = 3 + Math.random() * 3;
-    //   this.dir = randomAngle();
-    //   this.state = 'idle';
-    // }
 
     var speed = isMoving ? (this.speed) * 10 : 0;
 
@@ -691,8 +676,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     this.pos.x += vx;
     this.pos.y += vy;
     // prevent walking through blocks
-    // eslint-disable-next-line no-redeclare
-    for (var i = 0, l = blocks.length; i < l; i++) {
+    for (let i = 0, l = blocks.length; i < l; i++) {
         if (this.intersect = blocks[i].rayIntersect(this.pos, this.dir)) {
             if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
                 this.pos = this.intersect[0].pos;
@@ -701,9 +685,10 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                 //this.newDir = this.intersect[0].n;
                 this.dir = randomAngle();
                 break;
-            } else if (this.intersect[0].dist <= this.viewDist) {
-
-            } else {
+            }
+            else if (this.intersect[0].dist <= this.viewDist) {
+            }
+            else {
                 this.intersect = false;
             }
         }
@@ -713,22 +698,22 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     // bouncing it by 50 might be kinda high but i don't want 0 magnitude inputs for the eyes x, y
     var bound = false;
     if (this.pos.x < 0) {
-        this.pos.x = 50;
+        this.pos.x = 1;
         this.dir.x = 1;
         bound = true
     }
     if (this.pos.y < 0) {
-        this.pos.y = 50;
+        this.pos.y = 1;
         this.dir.y = 1;
         bound = true;
     }
     if (this.pos.x > ctx.canvas.width) {
-        this.pos.x = ctx.canvas.width - 50;
+        this.pos.x = ctx.canvas.width - 1;
         this.dir.x = -1;
         bound = true;
     }
     if (this.pos.y > ctx.canvas.height) {
-        this.pos.y = ctx.canvas.height - 50;
+        this.pos.y = ctx.canvas.height - 1;
         this.dir.y = -1;
         bound = true;
     }
@@ -741,18 +726,6 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
 
     if (this.isHuman === true && states.length > 0) {
         agentExperienceResult.newObservation = states;
-        //model.remember([oldStates, oldActions, this.rewardSignal, states, actions, 1]);
-        // if (totalTurns % batchSize === 0) {
-        //     const [actorHistory, criticHistory, samples] = await model.train();
-        //     actorLossValues.push(actorHistory);
-        //     criticLossValues.push(criticHistory);
-        //     if (totalTurns % (batchSize * 100) === 0) {
-        //         // eslint-disable-next-line no-unused-vars
-        //         //const saveResult = await model.save('indexeddb://zombie-ac-1layer-2-reward-1-rotate');
-        //     }
-        //     $("#samples").text(samples.length);
-        // }
-
         totalRewards += this.rewardSignal;
         rewardOverTime.push(this.rewardSignal);
         $("#rewardTotal").text(totalRewards);
@@ -770,27 +743,37 @@ Agent.prototype.shoot = (agent) => {
 
     ctx.moveTo(agent.pos.x, agent.pos.y);
 
-    const closestBaddy = agent.target;
-    if (closestBaddy) {
-        ctx.strokeStyle = 'red';
-        agent.rewardSignal += baseReward;
-        hitShotsBaddy += 1;
-        ctx.lineTo(closestBaddy.pos.x, closestBaddy.pos.y);
-        closestBaddy.currentHp--;
-        closestBaddy.state = 'idle';
-        if (closestBaddy.currentHp < 1)
+    const closestTarget = agent.target;
+    if (closestTarget) {
+        if (closestTarget.isHuman) {
+            ctx.strokeStyle = 'orange';
+            agent.rewardSignal -= baseReward;
+            negRewards -= baseReward;
+            hitShotsHuman += 1;
 
-            closestBaddy.ring = 10;
-        if (closestBaddy.hp < 1) {
+        }
+        else {
+            ctx.strokeStyle = 'red';
+            agent.rewardSignal += baseReward;
+            hitShotsBaddy += 1;
+        }
+        ctx.lineTo(closestTarget.pos.x, closestTarget.pos.y);
+        closestTarget.currentHp--;
+        closestTarget.state = 'idle';
+        if (closestTarget.currentHp < 1)
+
+            closestTarget.ring = 5;
+        if (closestTarget.hp < 1) {
+            console.log('killed target' + closestTarget.id +closestTarget.type);
             //todo: remove or create some kinda goodie
             //closestBaddy.agent.viewFov = this.viewFov;
             //closestBaddy.agent.viewFovD2 = this.viewFovD2;
-            closestBaddy.speed = 0;
+            closestTarget.speed = 0;
             //closestBaddy.agent.turnSpeed = this.turnSpeed;
 
-            closestBaddy.ring = 20;
-            agents = agents.filter(agent => agent !== closestBaddy);
-            agent.items - agent.items.filter(agent => agent !== closestBaddy);
+            closestTarget.ring = 5;
+            agents = agents.filter(agent => agent !== closestTarget);
+            agent.items - agent.items.filter(agent => agent !== closestTarget);
         }
     }
     else {
@@ -866,7 +849,7 @@ var clock = {
     delta: 0
 };
 
-async function mainLoop(time, action,agentExperienceResult) {
+async function mainLoop(time, action, agentExperienceResult) {
     if (!time) {
         time = Date.now();
     }
@@ -890,6 +873,7 @@ async function mainLoop(time, action,agentExperienceResult) {
     for (let i = 0, l = agents.length; i < l; i++) {
         if (agents[i].type === 'human') hCnt++;
         if (agents[i].type === 'zombie') zCnt++;
+        // this will end up  taking the last human's observation for the NN
         await agents[i].logic(ctx, clock, action, agentExperienceResult);
         agents[i].draw(ctx);
     }
@@ -909,6 +893,7 @@ async function mainLoop(time, action,agentExperienceResult) {
     ctx.strokeStyle = '#FFFFFF';
     ctx.stroke();
     totalTurns++;
+    $("#hit-shots-human").text(hitShotsHuman);
     $("#hit-shots-baddy").text(hitShotsBaddy);
     $("#missed-shots").text(missedShots);
     $("#turns").text(totalTurns);
@@ -926,7 +911,6 @@ class Env {
         }
         this.resets = 0
     }
-
     async step(action) {
         if (Array.isArray(action)) {
             action = action[0]
@@ -935,15 +919,21 @@ class Env {
             return;
         }
         isRunning = true;
+        //hack move zombies  on first step, then move 1 human perstep
         const agentExperienceResult = {
             newObservation: null,
             reward: null
         };
         loopCount++;
         if (loopCount >= batchSize * 10 || !continueLoop) {
-            
-            if (loopCount >= batchSize * 10)
+            if (loopCount >= batchSize * 100) {
+                continueLoop = false;
+            }
+            if (loopCount >= batchSize * 10) {
                 loopCount = 0;
+
+            }
+
             if (loopCount <= 1) {
                 // const weights = model.actor.getWeights();
                 // const criticWeights = model.critic.getWeights();
@@ -954,12 +944,10 @@ class Env {
                 // $("#criticWeights").text(criticWeightsData);
                 // $("#current-state").text(states.join(', '));
 
-                await createOrUpdateRewardChart(rewardOverTime, batchSize)
+                createOrUpdateRewardChart(rewardOverTime, batchSize)
                 //await createOrUpdateLossesChart();
 
             }
-            
-           
 
             ctx = canvas.getContext('2d');
             isRunning = false;
@@ -975,6 +963,11 @@ class Env {
                 // Add any other methods you use
             };
             isRunning = false;
+            // this isn't detecing the spacebar while the thrrad is blocked by the loop
+            if (loopCount >= batchSize * 10) {
+                loopCount = 0;
+                continueLoop = false;
+            }
             await mainLoop(0, action, agentExperienceResult);
         }
         this.i += 1
@@ -982,7 +975,7 @@ class Env {
     }
     reset() {
         this.i = 0
-        return  new Array(this.observationSpace.shape).fill(.1);
+        return new Array(this.observationSpace.shape).fill(.1);
     }
 }
 function requestAnimationFrameAsync(func) {
@@ -992,20 +985,7 @@ function requestAnimationFrameAsync(func) {
         });
     });
 }
-const config = {
-    nSteps: 512,                 // Number of steps to collect rollouts
-    nEpochs: 10,                 // Number of epochs for training the policy and value networks
-    policyLearningRate: 1e-3,    // Learning rate for the policy network
-    valueLearningRate: 1e-3,     // Learning rate for the value network
-    clipRatio: 0.2,              // PPO clipping ratio for the objective function
-    targetKL: 0.01,              // Target KL divergence for early stopping during policy optimization
-    netArch: {
-        'pi': [90, 90],          // Network architecture for the policy network
-        'vf': [90, 90]           // Network architecture for the value network
-    },
-    activation: 'tanh',          // Activation function to be used in both policy and value networks
-    verbose: 0                   // Verbosity level (0 for no logging, 1 for logging)
-}
+
 let isRunning = false;
 let lossesChart;
 async function createOrUpdateLossesChart() {
@@ -1048,7 +1028,7 @@ async function createOrUpdateLossesChart() {
 
 let chart; // Declare chart variable outside the function
 
-async function createOrUpdateRewardChart(rewardOverTime, batchSize) {
+function createOrUpdateRewardChart(rewardOverTime, batchSize) {
     let ctx = document.getElementById('rewardOverTimeChart').getContext('2d');
 
     // Calculate average reward for each batch
@@ -1096,7 +1076,9 @@ window.addEventListener('keydown', (event) => {
         continueLoop = !continueLoop;
     }
 });
-$(function () {
+let ppo = null;
+
+(async function () {
 
     $('#gameSpeed').change(function () {
         gameSpeed = $(this).val();
@@ -1132,8 +1114,24 @@ $(function () {
         h.viewDist = 1000;
     });
     const env = new Env();
-const ppo = new PPO(env, config)
-;(async () => {
+    const config = {
+        nSteps: 512,                 // Number of steps to collect rollouts
+        nEpochs: 10,                 // Number of epochs for training the policy and value networks
+        policyLearningRate: .0005,    // Learning rate for the policy network
+        valueLearningRate: .0005,     // Learning rate for the value network
+        clipRatio: 0.2,              // PPO clipping ratio for the objective function
+        targetKL: 0.01,              // Target KL divergence for early stopping during policy optimization
+        netArch: {
+            'pi': [90],          // Network architecture for the policy network
+            'vf': [90]           // Network architecture for the value network
+        },
+        activation: 'tanh',          // Activation function to be used in both policy and value networks
+        verbose: 0                   // Verbosity level (0 for no logging, 1 for logging)
+    }
+    ppo = new PPO(env, config);
+    //ppo.actor = await tf.loadLayersModel('indexeddb://zombie-actor-may20');
+    //ppo.critic = await tf.loadLayersModel('indexeddb://zombie-critic-may20');
+
     await ppo.learn({
         'totalTimesteps': 1000000,
         'callback': {
@@ -1142,6 +1140,6 @@ const ppo = new PPO(env, config)
             }
         }
     })
-})()
 
-})
+
+})();
