@@ -40,7 +40,7 @@ purp
   <div>
     <label for="slider-batch">BatchSize:</label>
     <span id="batch-value"></span>
-    <input type="range" id="slider-batch" name="slider-batch" min="4" max="1024" step="4" value="264" oninput="showValue(this.value, '#batch-value')">
+    <input type="range" id="slider-batch" name="slider-batch" min="4" max="1024" step="4" value="512" oninput="showValue(this.value, '#batch-value')">
     <label for="slider-lr">Learning Rate:</label>
     <!-- <span id="lr-value"></span>
     <input type="range" id="slider-lr" name="slider-lr" min=".001" max=".05" step="0.001" value="0.004" oninput="showValue(this.value, '#lr-value')">
@@ -113,7 +113,8 @@ Click inside this box to close it.</pre>
   <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script> -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="./scriptPPO.js"></script>
+  <script src="./ppo.js"></script>
+  <script src="./scriptMain.js"></script>
 
 </body>
 

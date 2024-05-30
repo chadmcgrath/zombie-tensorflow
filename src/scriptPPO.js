@@ -2,7 +2,7 @@
 /* global $ */
 /* global Chart */
 //tf.enableDebugMode();
-//tf.setBackend('cpu');
+tf.setBackend('cpu');
 
 
 window.addEventListener('beforeunload', () => {
@@ -12,7 +12,7 @@ window.addEventListener('beforeunload', () => {
 class ActorCriticModel {
 
   constructor(learningRate, numLayers, numInputs, numActions, hiddenUnits, gamma, batchSize) {
-    this.maxMemorySize = 10000;
+    this.maxMemorySize = 50000;
     this.numInputs = numInputs;
     this.numActions = numActions;
     this.hiddenUnits = hiddenUnits;
@@ -328,8 +328,8 @@ let hitShotsBaddy = 0;
 const gamma = 0.8;  // Discount factor
 const numActions = 16;
 const numInputs = 91;
-const learningRate = .005;//+$('#slider-lr').val();
-const numHidden = 124;
+const learningRate = .0005;//+$('#slider-lr').val();
+const numHidden = 80;
 let batchSize = +$('#slider-batch').val();
 const numLayers = 2;
 let epsilon = 0;
