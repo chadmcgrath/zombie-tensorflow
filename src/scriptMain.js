@@ -23,7 +23,7 @@ let hitShotsHuman = 0;
 // Hyperparameters
 
 
-const numActions = 16;
+const numActions = 17;
 
 let batchSize = +$('#slider-batch').val();
 let epsilonGreedy = 0;
@@ -33,8 +33,6 @@ var oneRad = Math.PI / 180;
 var pi2 = Math.PI * 2;
 var gameSpeed = 3;
 var EPS = 0.01;
-
-
 
 function clone(v) {
     return {
@@ -345,6 +343,7 @@ function Agent(config) {
     const rads = 2 * Math.PI / eyeCount;
     this.isHuman = config.type === 'human';
     this.isZ = config.type === 'zombie';
+    this.isShot=false;
     if (this.isHuman)
         for (var k = 0; k < eyeCount; k++) { this.eyes.push(new Eye(k * rads)); }
 
@@ -385,14 +384,12 @@ function Agent(config) {
     this.ring = config.ring || this.type === 'human' ? 0 : 5;
 }
 
-Agent.prototype.getVision = () => {
+Agent.prototype.getVision =function(){
 
     let eyeStates = [];
-    for (let i = 0, n = this.agents.length; i < n; i++) {
-        var a = this.agents[i];
+    //for (let i = 0, n = this.agents.length; i < n; i++) {
+        var a = this;
         a.target = null;
-        // zombies do not have eyes
-        if (a.eyes.length === 0) continue;
         const pos = a.p;
         const angle = a.angle;
         for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
@@ -410,7 +407,7 @@ Agent.prototype.getVision = () => {
             var res = stuff_collide(a, eyep, true, true);
             if (res) {
                 // eye collided with anything
-                if(ei===0)
+                if (ei === 0)
                     a.target = res.agent;
                 // this is to check for an intermittent bug
                 if (ei === 0 && !res.agent) {
@@ -453,7 +450,7 @@ Agent.prototype.getVision = () => {
             if (e.sensed_type === 0) {
                 ctx.strokeStyle = "rgb(200,200,200)"; //nothing
             }
-            if (e.sensed_type === 1) { ctx.strokeStyle = "rgb(255,150,150)"; } // human
+            if (e.sensed_type === 1) { ctx.strokeStyle = "cyan"; } // human
             //if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
             if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
             if (ei === 0) {
@@ -479,7 +476,7 @@ Agent.prototype.getVision = () => {
             // tensorflow inputs
             eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
         }
-    }
+    //}
     // tensorflow inputs
     return eyeStates;
 }
@@ -556,7 +553,7 @@ Agent.prototype.see = function () {
 }
 
 Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
-    let isMoving = true;
+    let moveFactor = !this.isShot ? 1 : .5;
     var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
 
@@ -567,36 +564,39 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     // $('#slider-lr').val(0.01); // replace 0.01 with the value you want to set
     // $('#slider-epsilon').val(0.2); // replace 0.2 with the value you want to set
     const seen = this.see();
-
     // bite and maybe convert humans to zombie
     if (this.isHuman === false) {
         if (seen.some(s => s.agent.isHuman) === false) {
             this.state = 'idle';
             this.nextTimer = 3 + Math.random() * 10;
-            this.newDir = randomAngle();
-            this.state = 'idle';
+            this.newDir = randomAngle(.15);
+            this.dir = this.newDir;
+
         }
         for (let i = 0, l = seen.length; i < l; i++) {
-            if (seen[i].agent.isHuman === true && seen[i].dist < this.rad) {
-                // change to remove a hitpoint
-                --seen[i].agent.currentHp;
+            if (seen[i].dist <= this.rad *2) {
+                moveFactor = 0;
+                if (seen[i].agent.isHuman) {
+                    --seen[i].agent.currentHp;
 
-                //tf ml reward
-                seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward *4;
-                negRewards = negRewards - baseReward * 4;
+                    //tf ml reward
+                    seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward;
+                    negRewards = negRewards - baseReward;
 
-                if (seen[i].agent.currentHp < 1) {
-                    console.log('zombifying human' + seen[i].agent.id);
-                    seen[i].agent.isHuman = false;
-                    seen[i].agent.eyes = [];
-                    seen[i].agent.type = this.type;
-                    seen[i].agent.viewFov = this.viewFov;
-                    seen[i].agent.viewFovD2 = this.viewFovD2;
-                    seen[i].agent.speed = this.speed;
-                    seen[i].agent.turnSpeed = this.turnSpeed;
-                    seen[i].agent.state = 'idle';
-                    seen[i].agent.ring = 1;
+                    if (seen[i].agent.currentHp < 1) {
+                        console.log('zombifying human' + seen[i].agent.id);
+                        seen[i].agent.isHuman = false;
+                        seen[i].agent.eyes = [];
+                        seen[i].agent.type = this.type;
+                        seen[i].agent.viewFov = this.viewFov;
+                        seen[i].agent.viewFovD2 = this.viewFovD2;
+                        seen[i].agent.speed = this.speed;
+                        seen[i].agent.turnSpeed = this.turnSpeed;
+                        seen[i].agent.state = 'idle';
+                        seen[i].agent.ring = 1;
+                    }
                 }
+
             }
             const agentType = seen[i].agent.type;
 
@@ -614,6 +614,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                 this.newDir = seen[i].angle;
                 this.dir = seen[i].angle;
             }
+            
         }
     }
 
@@ -647,11 +648,15 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             actionSelected = action;
         }
         let newAngle = 0;
-        if (actionSelected < (numActions - 1)) {
-            const predictedActionVal = (actionSelected - ((numActions / 2) - 1)) * (360 / 30) * oneRad;
+        const numAngles = numActions - 2;
+        if (actionSelected < numAngles) {
+            const predictedActionVal = (actionSelected - (Math.floor(numActions / 2))) * (360 / 30) * oneRad;
             newAngle = predictedActionVal;
-        } else {
-            isMoving = false;
+        }else if(actionSelected === (numActions - 1)){ 
+            newAngle=Math.PI;
+        }
+        else {
+            moveFactor=0;
             this.shoot(this);
         }
 
@@ -667,7 +672,8 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     }
     this.nextTimer -= clock.delta;
 
-    var speed = isMoving ? (this.speed) * 10 : 0;
+    var speed = moveFactor * (this.speed) * 10;
+    this.isShot=false;
 
     // get velociy
     var vx = this.dir.x * speed * clock.delta;
@@ -754,17 +760,18 @@ Agent.prototype.shoot = (agent) => {
         }
         else {
             ctx.strokeStyle = 'red';
-            agent.rewardSignal += baseReward;
+            agent.rewardSignal += baseReward*.8;
             hitShotsBaddy += 1;
         }
         ctx.lineTo(closestTarget.pos.x, closestTarget.pos.y);
+        closestTarget.isShot = true;
         closestTarget.currentHp--;
         closestTarget.state = 'idle';
         if (closestTarget.currentHp < 1)
 
             closestTarget.ring = 5;
         if (closestTarget.hp < 1) {
-            console.log('killed target' + closestTarget.id +closestTarget.type);
+            console.log('killed target' + closestTarget.id + closestTarget.type);
             //todo: remove or create some kinda goodie
             //closestBaddy.agent.viewFov = this.viewFov;
             //closestBaddy.agent.viewFovD2 = this.viewFovD2;
@@ -780,8 +787,8 @@ Agent.prototype.shoot = (agent) => {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
         // to do: for now, we disgourage it from stopping and missing.
-        agent.rewardSignal = agent.rewardSignal - baseReward / 10;
-        negRewards = negRewards - baseReward / 10;
+        //agent.rewardSignal = agent.rewardSignal - baseReward / 10;
+        //negRewards = negRewards - baseReward / 10;
         missedShots += 1;
         ctx.strokeStyle = 'purple';
         ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
@@ -848,7 +855,8 @@ var clock = {
     time: 0,
     delta: 0
 };
-
+let zombiesGone = false;
+let humansGone = 0;
 async function mainLoop(time, action, agentExperienceResult) {
     if (!time) {
         time = Date.now();
@@ -870,12 +878,27 @@ async function mainLoop(time, action, agentExperienceResult) {
         blocks[i].draw(ctx);
     }
 
-    for (let i = 0, l = agents.length; i < l; i++) {
-        if (agents[i].type === 'human') hCnt++;
-        if (agents[i].type === 'zombie') zCnt++;
+    const zombies = agents.filter(agent => agent.type === 'zombie');
+    if (!zombiesGone) {
+        for (let i = 0, l = zombies.length; i < l; i++) {
+            zCnt++;
+            await zombies[i].logic(ctx, clock);
+            zombies[i].draw(ctx);
+        }
+        zombiesGone = true;
+    }
+    const humans = agents.filter(agent => agent.type === 'human');
+    hCnt = humans.length;
+    if (humansGone < hCnt) {
         // this will end up  taking the last human's observation for the NN
-        await agents[i].logic(ctx, clock, action, agentExperienceResult);
-        agents[i].draw(ctx);
+        await humans[humansGone].logic(ctx, clock, action, agentExperienceResult);
+        humans[humansGone].draw(ctx);
+        humansGone++;
+    }
+    // if all of the humans have been processa nd contributed to the NN
+    if (humansGone >= hCnt) {
+        humansGone = 0;
+        zombiesGone = false;
     }
 
     ctx.font = '20pt Calibri';
@@ -925,7 +948,7 @@ class Env {
             reward: null
         };
         loopCount++;
-        if (loopCount >= batchSize * 10 || !continueLoop) {
+        if (loopCount >= batchSize * 10 || loopCount < 5 || !continueLoop) {
             if (loopCount >= batchSize * 100) {
                 continueLoop = false;
             }
@@ -1090,7 +1113,7 @@ let ppo = null;
     });
     // eslint-disable-next-line no-unused-vars
     const windowArea = $(window).width() * $(window).height();
-    const blockNum = 0;// windowArea / 50000;
+    const blockNum = windowArea / 50000;
     for (let i = 0, l = blockNum; i < l; i++) {
         blocks.push(new Square({}));
     }
@@ -1106,7 +1129,6 @@ let ppo = null;
                 y: canvas.height * Math.random()
             }
         }));
-
     }
     const humans = agents.filter(a => a.isHuman === true);
     humans.forEach(h => {
@@ -1117,13 +1139,13 @@ let ppo = null;
     const config = {
         nSteps: 512,                 // Number of steps to collect rollouts
         nEpochs: 10,                 // Number of epochs for training the policy and value networks
-        policyLearningRate: .0005,    // Learning rate for the policy network
-        valueLearningRate: .0005,     // Learning rate for the value network
+        policyLearningRate: .001,    // Learning rate for the policy network
+        valueLearningRate: .001,     // Learning rate for the value network
         clipRatio: 0.2,              // PPO clipping ratio for the objective function
-        targetKL: 0.01,              // Target KL divergence for early stopping during policy optimization
+        targetKL: 0.01,            // Target KL divergence for early stopping during policy optimization
         netArch: {
-            'pi': [90],          // Network architecture for the policy network
-            'vf': [90]           // Network architecture for the value network
+            'pi': [90, 90],          // Network architecture for the policy network
+            'vf': [90, 90]           // Network architecture for the value network
         },
         activation: 'tanh',          // Activation function to be used in both policy and value networks
         verbose: 0                   // Verbosity level (0 for no logging, 1 for logging)
@@ -1133,7 +1155,7 @@ let ppo = null;
     //ppo.critic = await tf.loadLayersModel('indexeddb://zombie-critic-may20');
 
     await ppo.learn({
-        'totalTimesteps': 1000000,
+        'totalTimesteps': 10000000,
         'callback': {
             'onTrainingStart': function (p) {
                 console.log(p.config)

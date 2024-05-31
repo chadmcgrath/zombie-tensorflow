@@ -231,8 +231,8 @@ class PPO {
         }
 
         // Initialize optimizers
-        this.optPolicy = tf.train.adam(this.config.policyLearningRate)
-        this.optValue = tf.train.adam(this.config.valueLearningRate)
+        this.optPolicy = tf.train.rmsprop(this.config.policyLearningRate)
+        this.optValue = tf.train.rmsprop(this.config.valueLearningRate)
     }
 
     createActor() {
