@@ -2,7 +2,7 @@
 /* global $ */
 /* global Chart */
 /* global PPO */
-tf.enableDebugMode();//
+//tf.enableDebugMode();//
 
 /* global tf */
 tf.setBackend('cpu');
@@ -83,8 +83,8 @@ function Square(config) {
     this.fill = config.fill || '#CCC';
     this.stroke = config.stroke || '#000';
     this.pos = config.pos || {
-        x: ctx.canvas.width * Math.random(),
-        y: ctx.canvas.height * Math.random()
+        x: (ctx.canvas.width-20) * Math.random(),
+        y: (ctx.canvas.height-20) * Math.random()
     };
     this.width = config.width || 20 + Math.random() * 100;
     this.height = config.height || 20 + Math.random() * 100;
@@ -335,7 +335,7 @@ var Eye = function (angle) {
 function Agent(config) {
     this.id = config.id;
 
-    const maxHp = 50000;
+    const maxHp = 50;
     const eyeCount = 30;
     this.eyes = [];
     this.rewardSignal = 0;
@@ -357,7 +357,7 @@ function Agent(config) {
         x: 0,
         y: 0
     };
-
+    this.minRad= 10;
     this.rad = 10;
     this.speed = config.speed || this.type === 'human' ? 4 : 1;
     this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
@@ -434,13 +434,12 @@ Agent.prototype.getVision = function () {
         // if (e.sensed_type === 0) {
         //     ctx.strokeStyle = "rgb(200,200,200)"; //nothing
         // }
-        if (e.sensed_type === 1) { ctx.strokeStyle = "yellow"; } // human
+        //if (e.sensed_type === 1) { ctx.strokeStyle = "yellow"; } // human
         //if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
-        if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
-        if (ei === 0) {
-            ctx.strokeStyle = "blue";
-            $('#blue-eye').text(currentEyeAnglePointing);
-        }
+        //if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
+        // if (ei === 0) {
+        //     ctx.strokeStyle = "blue";
+        // }
 
         const sr = e.sensed_proximity;
         ctx.beginPath();
@@ -540,6 +539,7 @@ Agent.prototype.getStates = async function () {
     const vision = [...this.getVision()];
     const target = (this.isBit || !this.target) ? 0 : this.target.isHuman ? 1 : -1;
     vision.push(target);
+    vision.push(this.isBit ? -1 : 0);
     return vision;
     // const partSize = 3;
     // var result = [];
@@ -549,7 +549,7 @@ Agent.prototype.getStates = async function () {
     // return result;
 }
 Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
-    let moveFactor = !this.isShot ? 1 : .1;
+    let moveFactor = this.isShot ? .1 : 1;
     var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
 
@@ -583,13 +583,15 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                     inMelee = true;
                     --seen[i].agent.currentHp;
                     seen[i].agent.isBit = true;
+                    ++ this.currentHp/10;
                     //tf ml reward
                     seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward;
                     negRewards = negRewards - baseReward;
 
                     if (seen[i].agent.currentHp < 1) {
                         console.log('zombifying human' + seen[i].agent.id);
-                        // tdo: destructure this and assign to new agent
+                        // todo: destructure this and assign to new agent
+                        seen[i].agent.isLearning = false;
                         seen[i].agent.isHuman = false;
                         seen[i].agent.isZ = true;
                         seen[i].agent.eyes = [];
@@ -604,23 +606,31 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                 }
             }
         }
+        if(isVampire)
+            this.rad = Math.max(this.minRad,this.minRad + this.currentHp - this.maxHp);
         if (!inMelee && moveFactor === 0) {
-            this.state = 'idle';
-            this.nextTimer = 3 + Math.random() * 10;
-            this.newDir = randomAngle();
-            this.dir = this.newDir;
-            this.moveFactor = .2;
+            if (this.nextTimer <= 0) {
+                this.state = 'idle';
+                this.nextTimer = 3 + Math.random() * 10;
+                this.newDir = randomAngle();
+                this.dir = this.newDir;
+                this.moveFactor = .2;
+            }
         }
         // follow other zombie
         else if (this.state === 'idle' && Math.random() > 0.9 && seen[0] && moveFactor > 0) {
-            this.nextTimer = 5;
-            this.newDir = seen[0].angle;
-            this.dir = seen[0].angle;
+            if (this.nextTimer <= 0) {
+                this.nextTimer = 5;
+                this.newDir = seen[0].angle;
+                this.dir = seen[0].angle;
+            }
         }
         else if (this.state === 'idle') {
-            this.nextTimer = 3 + Math.random() * 10;
-            this.newDir = randomAngle();
-            this.dir = this.newDir;
+            if (this.nextTimer <= 0) {
+                this.newDir = randomAngle();
+                this.dir = this.newDir;
+                this.nextTimer = 3 + Math.random() * 10;
+            }
         }
         if (this.isShot)
             this.moveFactor = .1;
@@ -650,9 +660,13 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             newAngle = Math.PI;
         }
         else {
-            console.log('shoot'+actionSelected);
+            console.log('shoot' + actionSelected);
             moveFactor = 0;
             this.shoot(this);
+        }
+        // stop if collided with another human
+        if(this.eyes[0].sensed_type === 1 && this.eyes[0].sensed_proximity < this.rad * 2){
+            moveFactor = 0;
         }
         this.isBit = false;
 
@@ -746,7 +760,9 @@ Agent.prototype.shoot = (agent) => {
     ctx.lineWidth = 6;
 
     ctx.moveTo(agent.pos.x, agent.pos.y);
-
+    const sr = agent.eyes[0].sensed_proximity;
+    const lineToX = agent.pos.x + sr * agent.dir.x;
+    const lineToY = agent.pos.y + sr * agent.dir.y;
     const closestTarget = agent.target;
     if (closestTarget) {
         if (closestTarget.isHuman) {
@@ -761,7 +777,8 @@ Agent.prototype.shoot = (agent) => {
             !agent.isBit && (agent.rewardSignal += baseReward);
             hitShotsBaddy += 1;
         }
-        ctx.lineTo(closestTarget.pos.x, closestTarget.pos.y);
+        
+        
         closestTarget.isShot = true;
         closestTarget.currentHp--;
         closestTarget.state = 'idle';
@@ -777,13 +794,12 @@ Agent.prototype.shoot = (agent) => {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
         // to do: for now, we disgourage it from stopping and missing.
-        //agent.rewardSignal = agent.rewardSignal - baseReward / 20;
-        //negRewards = negRewards - baseReward / 20;
+        agent.rewardSignal = agent.rewardSignal - baseReward / 20;
+        negRewards = negRewards - baseReward / 20;
         missedShots += 1;
         ctx.strokeStyle = 'purple';
-        ctx.lineTo(agent.pos.x + agent.dir.x * eyeMaxRange, agent.pos.y + agent.dir.y * eyeMaxRange);
-        // check if hits any agent items
     }
+    ctx.lineTo(lineToX, lineToY);
     ctx.stroke();
 
 }
@@ -867,12 +883,11 @@ async function mainLoop(time, action, agentExperienceResult) {
         blocks[i].draw(ctx);
     }
 
-    let zombies = agents.filter(agent => agent.type === 'zombie');
-
+    let zombies = agents.filter(agent => agent.isZ);
 
     if (zombies.length < 3) {
         addUnit('zombie');
-        zombies = agents.filter(agent => agent.type === 'zombie');
+        zombies = agents.filter(agent => agent.isZ);
     }
     for (let i = 0, l = zombies.length; i < l; i++) {
         zCnt++;
@@ -880,13 +895,12 @@ async function mainLoop(time, action, agentExperienceResult) {
         zombies[i].draw(ctx);
     }
 
-    let humans = agents.filter(agent => agent.type === 'human');
+    let humans = agents.filter(agent => agent.isHuman);
     if (humans.length < 3) {
         addUnit('human');
-        humans = agents.filter(agent => agent.type === 'human');
+        humans = agents.filter(agent => agent.isHuman);
     }
     hCnt = humans.length;
-    // this will end up  taking the last human's observation for the NN
 
     for (let i = 0, l = humans.length; i < l; i++) {
         if (i === 0) {
@@ -894,6 +908,7 @@ async function mainLoop(time, action, agentExperienceResult) {
             await humans[0].logic(ctx, clock, action, agentExperienceResult);
         }
         else {
+            // these are the other humans
             const sts = await humans[i].getStates();
             const statesT = tf.tensor([sts]);
             const actionProbabilities = await ppo.predict(statesT);
@@ -931,10 +946,8 @@ class Env {
         }
         this.observationSpace = {
             'class': 'Box',
-            'shape': [91],
+            'shape': [92],
             'dtype': 'float32',
-            //'low': [-1, -1,-1],
-            //'high': [1, 1,1],
         }
         this.resets = 0
     }
@@ -942,11 +955,6 @@ class Env {
         if (Array.isArray(action)) {
             action = action[0]
         }
-        if (isRunning) {
-            return;
-        }
-        isRunning = true;
-        //hack move zombies  on first step, then move 1 human perstep
         const agentExperienceResult = {
             newObservation: null,
             reward: null
@@ -977,7 +985,6 @@ class Env {
             }
 
             ctx = canvas.getContext('2d');
-            isRunning = false;
             await requestAnimationFrameAsync(async (time) => await mainLoop(time, action, agentExperienceResult));
         } else if (continueLoop) {
             // don't draw. just keep going and train the model
@@ -989,7 +996,6 @@ class Env {
                 stroke: function () { },
                 // Add any other methods you use
             };
-            isRunning = false;
             // this isn't detecing the spacebar while the thrrad is blocked by the loop
             if (loopCount >= batchSize * 10) {
                 loopCount = 0;
@@ -1002,7 +1008,7 @@ class Env {
     }
     reset() {
         this.i = 0;
-        const  array = new Array(this.observationSpace.shape[0]).fill(.1); 
+        const array = new Array(this.observationSpace.shape[0]).fill(.1);
         // const  array = Array.from({ length: this.observationSpace.shape[0] }, 
         //     () => new Array(this.observationSpace.shape[1]).fill(.1));
         return array;
@@ -1016,7 +1022,6 @@ function requestAnimationFrameAsync(func) {
     });
 }
 
-let isRunning = false;
 let lossesChart;
 async function createOrUpdateLossesChart() {
     const ctx = document.getElementById('losses-chart').getContext('2d');
@@ -1097,12 +1102,6 @@ function createOrUpdateRewardChart(rewardOverTime, batchSize) {
         chart.update();
     }
 }
-
-window.addEventListener('keydown', (event) => {
-    if (event.code === 'Space') {
-        continueLoop = !continueLoop;
-    }
-});
 async function removeUnit(unit) {
     for (const a of agents) {
         a.items = a.items.filter(a => a !== unit);
@@ -1127,6 +1126,17 @@ async function addUnit(t = 'zombie') {
         h.viewDist = 1000;
     });
 }
+window.addEventListener('keydown', (event) => {
+    if (event.code === 'Space') {
+        continueLoop = !continueLoop;
+    }
+});
+let isVampire = false;
+window.addEventListener('keydown', (event) => {
+    if (event.code === 'KeyV') {
+        isVampire = !isVampire;
+    }
+});
 let maxId = 0;
 let ppo = null;
 (async function () {
@@ -1138,14 +1148,16 @@ let ppo = null;
     $("#help").click(function () {
         $(this).hide();
     });
+
+    
     // eslint-disable-next-line no-unused-vars
     const windowArea = $(window).width() * $(window).height();
-    const blockNum = 0;//windowArea / 50000;
+    const blockNum = windowArea / 50000;
     for (let i = 0, l = blockNum; i < l; i++) {
         blocks.push(new Square({}));
     }
-    const maxAgents = 11;//windowArea / 10000;
-    const numHumans = 3;
+    const maxAgents = 51;//windowArea / 10000;
+    const numHumans = 50;
     for (let i = 0, l = maxAgents; i < l; i++) {
         agents.push(new Agent({
             id: i + 1,
@@ -1193,3 +1205,4 @@ let ppo = null;
 
 
 })();
+
