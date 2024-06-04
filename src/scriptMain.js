@@ -83,8 +83,8 @@ function Square(config) {
     this.fill = config.fill || '#CCC';
     this.stroke = config.stroke || '#000';
     this.pos = config.pos || {
-        x: (ctx.canvas.width-20) * Math.random(),
-        y: (ctx.canvas.height-20) * Math.random()
+        x: (ctx.canvas.width - 20) * Math.random(),
+        y: (ctx.canvas.height - 20) * Math.random()
     };
     this.width = config.width || 20 + Math.random() * 100;
     this.height = config.height || 20 + Math.random() * 100;
@@ -334,7 +334,7 @@ var Eye = function (angle) {
 }
 function Agent(config) {
     this.id = config.id;
-
+    this.isLearning = false;
     const maxHp = 50;
     const eyeCount = 30;
     this.eyes = [];
@@ -357,7 +357,7 @@ function Agent(config) {
         x: 0,
         y: 0
     };
-    this.minRad= 10;
+    this.minRad = 10;
     this.rad = 10;
     this.speed = config.speed || this.type === 'human' ? 4 : 1;
     this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
@@ -541,12 +541,6 @@ Agent.prototype.getStates = async function () {
     vision.push(target);
     vision.push(this.isBit ? -1 : 0);
     return vision;
-    // const partSize = 3;
-    // var result = [];
-    // for (var i = 0; i < vision.length; i += partSize) {
-    //     result.push(vision.slice(i, i + partSize));
-    // }
-    // return result;
 }
 Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
     let moveFactor = this.isShot ? .1 : 1;
@@ -583,31 +577,30 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                     inMelee = true;
                     --seen[i].agent.currentHp;
                     seen[i].agent.isBit = true;
-                    ++ this.currentHp/10;
+
+                    if (isVampire)
+                        ++this.currentHp / 10;
+
                     //tf ml reward
                     seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward;
                     negRewards = negRewards - baseReward;
-
                     if (seen[i].agent.currentHp < 1) {
                         console.log('zombifying human' + seen[i].agent.id);
-                        // todo: destructure this and assign to new agent
-                        seen[i].agent.isLearning = false;
-                        seen[i].agent.isHuman = false;
-                        seen[i].agent.isZ = true;
-                        seen[i].agent.eyes = [];
-                        seen[i].agent.type = this.type;
-                        seen[i].agent.viewFov = this.viewFov;
-                        seen[i].agent.viewFovD2 = this.viewFovD2;
-                        seen[i].agent.speed = this.speed;
-                        seen[i].agent.turnSpeed = this.turnSpeed;
-                        seen[i].agent.state = 'idle';
+                        const p = seen[i].agent.pos;
+                        const d = seen[i].agent.dir;
+                        Object.assign(seen[i].agent, this);
+                        seen[i].agent.pos = p;
+                        seen[i].agent.dir = d;
+                        seen[i].agent.currentHp = this.maxHp;
                         seen[i].agent.ring = 1;
+                        seen[i].agent.state = 'idle';
                     }
                 }
             }
         }
-        if(isVampire)
-            this.rad = Math.max(this.minRad,this.minRad + this.currentHp - this.maxHp);
+        if (isVampire)
+            this.rad = Math.max(this.minRad, this.minRad + this.currentHp - this.maxHp);
+
         if (!inMelee && moveFactor === 0) {
             if (this.nextTimer <= 0) {
                 this.state = 'idle';
@@ -638,8 +631,6 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
 
     if (this.isHuman) {
         this.state = 'panic';
-        this.nextTimer = 5;
-
         states = await this.getStates();
 
         let actionSelected;
@@ -647,7 +638,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             // Take a random action
             actionSelected = Math.floor(Math.random() * numActions);
             const actionsOneHot = Array(numActions).fill(.1);
-            actionsOneHot[actionSelected] = .85;
+            actionsOneHot[actionSelected] = .8;
         } else {
             actionSelected = action;
         }
@@ -660,12 +651,12 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             newAngle = Math.PI;
         }
         else {
-            console.log('shoot' + actionSelected);
             moveFactor = 0;
             this.shoot(this);
         }
         // stop if collided with another human
-        if(this.eyes[0].sensed_type === 1 && this.eyes[0].sensed_proximity < this.rad * 2){
+        if (this.eyes[0].sensed_type === 1 && this.eyes[0].sensed_proximity < this.rad * 2) {
+            this.rewardSignal = this.rewardSignal - baseReward / 2;
             moveFactor = 0;
         }
         this.isBit = false;
@@ -696,13 +687,11 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         if (this.intersect = blocks[i].rayIntersect(this.pos, this.dir)) {
             if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
                 this.pos = this.intersect[0].pos;
-                this.rewardSignal = this.rewardSignal - baseReward / 10;
-                negRewards = negRewards - baseReward / 10;
+                this.rewardSignal = this.rewardSignal - baseReward / 2;
+                negRewards = negRewards - baseReward / 2;
                 //this.newDir = this.intersect[0].n;
                 this.dir = randomAngle();
                 break;
-            }
-            else if (this.intersect[0].dist <= this.viewDist) {
             }
             else {
                 this.intersect = false;
@@ -711,7 +700,6 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     }
 
     // if we hit a wall turn arround
-    // bouncing it by 50 might be kinda high but i don't want 0 magnitude inputs for the eyes x, y
     var bound = false;
     if (this.pos.x < 0) {
         this.pos.x = 1;
@@ -734,8 +722,8 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         bound = true;
     }
     if (bound) {
-        this.rewardSignal = this.rewardSignal - baseReward / 5;
-        negRewards = negRewards - baseReward / 5;
+        this.rewardSignal = this.rewardSignal - baseReward / 2;
+        negRewards = negRewards - baseReward / 2;
         normalize(this.dir);
     }
 
@@ -777,8 +765,8 @@ Agent.prototype.shoot = (agent) => {
             !agent.isBit && (agent.rewardSignal += baseReward);
             hitShotsBaddy += 1;
         }
-        
-        
+
+
         closestTarget.isShot = true;
         closestTarget.currentHp--;
         closestTarget.state = 'idle';
@@ -794,8 +782,8 @@ Agent.prototype.shoot = (agent) => {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
         // to do: for now, we disgourage it from stopping and missing.
-        agent.rewardSignal = agent.rewardSignal - baseReward / 20;
-        negRewards = negRewards - baseReward / 20;
+        agent.rewardSignal = agent.rewardSignal - baseReward / 10;
+        negRewards = negRewards - baseReward / 10;
         missedShots += 1;
         ctx.strokeStyle = 'purple';
     }
@@ -1149,13 +1137,38 @@ let ppo = null;
         $(this).hide();
     });
 
-    
+
     // eslint-disable-next-line no-unused-vars
     const windowArea = $(window).width() * $(window).height();
     const blockNum = windowArea / 50000;
     for (let i = 0, l = blockNum; i < l; i++) {
         blocks.push(new Square({}));
     }
+    // not sure how the height works for drawing the square but I'll wing it
+    const riverConfig1 = {
+        fill: "blue",
+        stroke: 'navy',
+
+        pos: {
+            x: (ctx.canvas.width / 2),
+            y: 0,
+        },
+        width: ctx.canvas.width / 50,
+        height: ctx.canvas.height - 10,
+    }
+    const riverConfig2 = {
+        fill: "blue",
+        stroke: 'navy',
+
+        pos: {
+            x: (ctx.canvas.width / 2),
+            y: ctx.canvas.height + 10,
+        },
+        width: ctx.canvas.width / 50,
+        height: ctx.canvas.height,
+    }
+    //blocks.push(new Square(riverConfig1));
+    //blocks.push(new Square(riverConfig2));
     const maxAgents = 51;//windowArea / 10000;
     const numHumans = 50;
     for (let i = 0, l = maxAgents; i < l; i++) {
