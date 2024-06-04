@@ -659,8 +659,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             this.rewardSignal = this.rewardSignal - baseReward / 2;
             moveFactor = 0;
         }
-        this.isBit = false;
-
+        
         const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
         const newVec = unitOldDir.rotate(newAngle);
         this.dir = newVec;
@@ -675,7 +674,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
 
     var speed = moveFactor * (this.speed) * 10;
     this.isShot = false;
-
+    this.isBit = false;
     // get velociy
     var vx = this.dir.x * speed * clock.delta;
     var vy = this.dir.y * speed * clock.delta;
@@ -1125,6 +1124,53 @@ window.addEventListener('keydown', (event) => {
         isVampire = !isVampire;
     }
 });
+window.addEventListener('keydown', (event) => {
+    if (event.code === 'KeyL') {
+        loadModels();
+    }
+});
+window.addEventListener('keydown', (event) => {
+    if (event.code === 'KeyS') {
+        saveModels();
+    }
+});
+$('#vampire-button').click(function() {
+    isVampire = !isVampire;
+  });
+
+  $('#rush-watch-button').click(function() {
+    continueLoop = !continueLoop;
+  });
+
+$('#save-button').click(async function() {
+    await saveModels();
+});
+
+$('#smith-button').click(async function() {
+    const l = agents.find(a => a.isLearning);
+    const y = agents.find(a => !a.isLearning);
+    l.isLearning=false;
+    y.isLearning= true;
+});
+$('#load-button').click(async function() {
+    await loadModels();
+});
+  $('#add-zombie-button').click(async function() {
+   await addUnit('zombie');
+  });
+  $('#add-human-button').click(async function() {
+    await addUnit('human');
+  });
+const loadModels = async () => {
+    ppo.actor = await tf.loadLayersModel('indexeddb://zed-tf-actor-current');
+    ppo.critic = await tf.loadLayersModel('indexeddb://zed-tf-critic-current');
+
+}
+const saveModels = async () => {
+    ppo.actor = await ppo.actor.loadLayersModel('indexeddb://zed-tf-actor-current');
+    ppo.critic = await ppo.critic.loadLayersModel('indexeddb://zed-tf-critic-current');
+
+}
 let maxId = 0;
 let ppo = null;
 (async function () {
@@ -1204,9 +1250,7 @@ let ppo = null;
         verbose: 1                  // Verbosity level (0 for no logging, 1 for logging)
     }
     ppo = new PPO(env, config);
-    //ppo.actor = await tf.loadLayersModel('indexeddb://zombie-actor-may20');
-    //ppo.critic = await tf.loadLayersModel('indexeddb://zombie-critic-may20');
-
+    
     await ppo.learn({
         'totalTimesteps': 10000000,
         'callback': {
