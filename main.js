@@ -14,7 +14,7 @@ function createWindow () {
 }
 
 app.whenReady().then(() => {
-  const id = powerSaveBlocker.start('prevent-app-suspension')
+  const id = powerSaveBlocker.start('prevent-display-sleep')
   console.log(powerSaveBlocker.isStarted(id))
   createWindow();
 });

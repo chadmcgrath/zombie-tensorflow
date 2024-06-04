@@ -231,8 +231,8 @@ class PPO {
         }
 
         // Initialize optimizers
-        this.optPolicy = tf.train.rmsprop(this.config.policyLearningRate)
-        this.optValue = tf.train.rmsprop(this.config.valueLearningRate)
+        this.optPolicy = tf.train.adam(this.config.policyLearningRate)
+        this.optValue = tf.train.adam(this.config.valueLearningRate)
     }
 
     createActor() {
@@ -470,10 +470,9 @@ class PPO {
                     : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0]
                 this.buffer.finishTrajectory(lastValue)
                 numEpisodes += 1
-                this.lastObservation = this.env.reset()
+                //this.lastObservation = this.env.reset()
             }
-        }
-            
+        }           
         callback.onRolloutEnd(this)
     }
 
