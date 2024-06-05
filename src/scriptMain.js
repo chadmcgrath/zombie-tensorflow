@@ -359,7 +359,7 @@ function Agent(config) {
     };
     this.minRad = 10;
     this.rad = 10;
-    this.speed = config.speed || this.type === 'human' ? 4 : 1;
+    this.speed = config.speed || this.type === 'human' ? 4 : 2;
     this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
     this.dir = randomAngle();
     this.newDir = clone(this.dir);
@@ -537,9 +537,9 @@ Agent.prototype.see = function () {
 }
 Agent.prototype.getStates = async function () {
     const vision = [...this.getVision()];
-    const target = (this.isBit || !this.target) ? 0 : this.target.isHuman ? 1 : -1;
-    vision.push(target);
-    vision.push(this.isBit ? -1 : 0);
+    //const target = (this.isBit || !this.target) ? 0 : this.target.isHuman ? 1 : -1;
+    //vision.push(target);
+    //vision.push(this.isBit ? -1 : 0);
     return vision;
 }
 Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
@@ -933,7 +933,7 @@ class Env {
         }
         this.observationSpace = {
             'class': 'Box',
-            'shape': [92],
+            'shape': [90],
             'dtype': 'float32',
         }
         this.resets = 0
@@ -1147,10 +1147,14 @@ $('#save-button').click(async function() {
 });
 
 $('#smith-button').click(async function() {
-    const l = agents.find(a => a.isLearning);
-    const y = agents.find(a => !a.isLearning);
+    const li = agents.findIndex(a => a.isLearning);
+    const yi = agents.findIndex(a => !a.isLearning);
+    const l =agents[li];
+    const y =agents[yi];
     l.isLearning=false;
     y.isLearning= true;
+    agents[li] = y;
+    agents[yi] = l;
 });
 $('#load-button').click(async function() {
     await loadModels();
@@ -1167,8 +1171,8 @@ const loadModels = async () => {
 
 }
 const saveModels = async () => {
-    ppo.actor = await ppo.actor.loadLayersModel('indexeddb://zed-tf-actor-current');
-    ppo.critic = await ppo.critic.loadLayersModel('indexeddb://zed-tf-critic-current');
+    await ppo.actor.save('indexeddb://zed-tf-actor-current');
+    await ppo.critic.save('indexeddb://zed-tf-critic-current');
 
 }
 let maxId = 0;
@@ -1241,7 +1245,7 @@ let ppo = null;
         policyLearningRate: .001,    // Learning rate for the policy network
         valueLearningRate: .001,     // Learning rate for the value network
         clipRatio: 0.2,              // PPO clipping ratio for the objective function
-        targetKL: 0.01,            // Target KL divergence for early stopping during policy optimization
+        targetKL: 0.05,            // Target KL divergence for early stopping during policy optimization
         netArch: {
             'pi': [100, 100],          // Network architecture for the policy network
             'vf': [100, 100]           // Network architecture for the value network
