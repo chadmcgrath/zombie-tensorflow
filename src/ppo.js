@@ -416,6 +416,7 @@ class PPO {
 
         for (let step = 0; step < this.config.nSteps; step++) {
             // Predict action, value and logprob from last observation
+            // todo for agent count
             const [preds, action, value, logprobability] = tf.tidy(() => {
                 const lastObservationT = tf.tensor([this.lastObservation])
                 const [predsT, actionT] = this.sampleAction(lastObservationT)

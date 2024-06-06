@@ -20,56 +20,49 @@ let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
+const minHumans = 3;
+const minZombies = 3;
+
 // Hyperparameters
-
-
-const numActions = 13;
-
+const numActions = 11;
 let batchSize = +$('#slider-batch').val();
 let epsilonGreedy = 0;
-const baseReward = 1;
+const learningRate = .0005;
+
+const baseReward = 1;// bites and hit shots
+const missedShotReward = -baseReward / 10;
+const bumpWallReward = -baseReward / 2;
+const bumpScreenReward = -baseReward / 2;
+const bumpHumanReward = -baseReward / 2;
 const eyeMaxRange = 1000;
 var oneRad = Math.PI / 180;
 var pi2 = Math.PI * 2;
 var gameSpeed = 3;
 var EPS = 0.01;
 
-function clone(v) {
-    return {
-        x: v.x,
-        y: v.y
-    };
-}
-
-function normalize(v) {
-    var d = Math.sqrt(v.x * v.x + v.y * v.y);
-    if (d === 0) return v;
-    v.x /= d;
-    v.y /= d;
-    return v;
-}
-
-function sub(v1, v2) {
-    return {
-        x: v1.x - v2.x,
-        y: v1.y - v2.y
-    };
+const configPpo = {
+    nSteps: batchSize,                 // Number of steps to collect rollouts
+    nEpochs: 10,                 // Number of epochs for training the policy and value networks
+    policyLearningRate: learningRate,    // Learning rate for the policy network
+    valueLearningRate: learningRate,     // Learning rate for the value network
+    clipRatio: 0.2,              //.2- PPO clipping ratio for the objective function
+    targetKL: 0.02,            // .01-Target KL divergence for early stopping during policy optimization
+    netArch: {
+        'pi': [100, 100],          // Network architecture for the policy network
+        'vf': [100, 100]           // Network architecture for the value network
+    },
+    activation: 'elu',          // Activation function to be used in both policy and value networks
+    verbose: 0                 // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
 }
 
 function project(v, d, t) {
-    return {
-        x: v.x + d.x * t,
-        y: v.y + d.y * t
-    };
+    return new Vec(v.x + d.x * t, v.y + d.y * t);
 }
 
 function randomAngle(s) {
     var r = Math.random() * pi2;
     if (!s) s = 1;
-    return {
-        x: Math.cos(r) * s,
-        y: Math.sin(r) * s
-    };
+    return new Vec(Math.cos(r) * s, Math.sin(r) * s);
 }
 
 function fixAngle(d) {
@@ -162,14 +155,11 @@ Square.prototype.rayIntersect = function (o, d) {
     };
     p1.n = this.pointNormal(p1.pos);
     p2.n = this.pointNormal(p2.pos);
-
-    //p1.n = normalize(sub(p1.pos,this.pos));
-    //p2.n = normalize(sub(p2.pos,this.pos));
     return [p1, p2];
 }
 
 // A 2D vector utility (Karpathy)
-var Vec = function (x, y) {
+const Vec = function (x, y) {
     this.x = x;
     this.y = y;
 }
@@ -353,16 +343,13 @@ function Agent(config) {
     this.items = [];
 
     this.type = config.type || 'human';
-    this.pos = config.pos || {
-        x: 0,
-        y: 0
-    };
+    this.pos = config.pos || new Vec(0,0);
     this.minRad = 10;
     this.rad = 10;
     this.speed = config.speed || this.type === 'human' ? 4 : 2;
     this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
     this.dir = randomAngle();
-    this.newDir = clone(this.dir);
+    this.newDir = this.dir.getUnit();
 
     //todo: remove duplicate position
     Object.defineProperty(this, 'angle', {
@@ -467,10 +454,9 @@ Agent.prototype.getVision = function () {
 Agent.prototype.getColor = function () {
     if (this.isLearning) return 'blue';
     if (this.state === 'mouse') return '#FF00FF';
-    if (this.state === 'panic') return 'yellow';
     if (this.state === 'attack') return 'red';
-    if (this.type === 'human') return 'blue';
-    if (this.type === 'zombie') return 'green';
+    if (this.isHuman) return 'yellow';
+    if (this.isZ) return 'green';
     return '#AAAAAA';
 };
 Agent.prototype.distTo = function (o) {
@@ -506,7 +492,7 @@ Agent.prototype.see = function () {
             if (ato >= a1 && ato <= a2) good = true;
         }
         if (good) {
-            const angle = normalize(sub(a.pos, this.pos))
+            const angle = a.pos.sub(this.pos).getUnit();
             let viewBlocked = false;
             for (var wi = 0, wl = blocks.length; wi < wl; wi++) {
                 let walls = blocks[wi].rayIntersect(this.pos, angle);
@@ -537,11 +523,22 @@ Agent.prototype.see = function () {
 }
 Agent.prototype.getStates = async function () {
     const vision = [...this.getVision()];
-    //const target = (this.isBit || !this.target) ? 0 : this.target.isHuman ? 1 : -1;
-    //vision.push(target);
-    //vision.push(this.isBit ? -1 : 0);
     return vision;
 }
+Agent.prototype.Zombify = async function (victim, zombie) {
+    console.log('zombifying human: ' + victim.id);
+    const p = victim.pos;
+    const d = victim.dir;
+    const id = victim.id;
+    Object.assign(victim, zombie);
+    victim.id = id;
+    victim.pos = p;
+    victim.dir = d;
+    victim.currentHp = this.maxHp;
+    victim.ring = 1;
+    victim.state = 'idle';
+}
+
 Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
     let moveFactor = this.isShot ? .1 : 1;
     var batchValue = $('#slider-batch').val();
@@ -550,11 +547,10 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     epsilonGreedy = +epsilonValue;
     batchSize = +batchValue;
     // // Setters
-    // $('#slider-batch').val(8); // replace 8 with the value you want to set
-    // $('#slider-lr').val(0.01); // replace 0.01 with the value you want to set
-    // $('#slider-epsilon').val(0.2); // replace 0.2 with the value you want to set
+    // $('#slider-batch').val(8); 
+    // $('#slider-lr').val(0.01); 
+    // $('#slider-epsilon').val(0.2); 
 
-    // omg i need to clean this up tod todo: todo
     // bite and maybe convert humans to zombie
     if (this.isHuman === false) {
         let inMelee = false;
@@ -573,28 +569,21 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             if (seen[i].dist <= this.rad * 2) {
                 moveFactor = 0;
                 if (seen[i].agent.isHuman) {
+                    const human = seen[i].agent;
                     moveFactor = 0;
                     inMelee = true;
-                    --seen[i].agent.currentHp;
-                    seen[i].agent.isBit = true;
+                    --human.currentHp;
+                    human.isBit = true;
 
                     if (isVampire)
                         ++this.currentHp / 10;
 
                     //tf ml reward
-                    seen[i].agent.rewardSignal = seen[i].agent.rewardSignal - baseReward;
+                    human.rewardSignal = human.rewardSignal - baseReward;
                     negRewards = negRewards - baseReward;
-                    if (seen[i].agent.currentHp < 1) {
-                        console.log('zombifying human' + seen[i].agent.id);
-                        const p = seen[i].agent.pos;
-                        const d = seen[i].agent.dir;
-                        Object.assign(seen[i].agent, this);
-                        seen[i].agent.pos = p;
-                        seen[i].agent.dir = d;
-                        seen[i].agent.currentHp = this.maxHp;
-                        seen[i].agent.ring = 1;
-                        seen[i].agent.state = 'idle';
-                    }
+                    if (human.currentHp < 1)
+                        await this.Zombify(human, this);
+
                 }
             }
         }
@@ -629,10 +618,8 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             this.moveFactor = .1;
     }
 
-    if (this.isHuman) {
-        this.state = 'panic';
+    else{
         states = await this.getStates();
-
         let actionSelected;
         if (Math.random() < epsilonGreedy) {
             // Take a random action
@@ -642,6 +629,7 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         } else {
             actionSelected = action;
         }
+
         let newAngle = 0;
         const numAngles = numActions - 2;
         if (actionSelected < numAngles) {
@@ -656,10 +644,11 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         }
         // stop if collided with another human
         if (this.eyes[0].sensed_type === 1 && this.eyes[0].sensed_proximity < this.rad * 2) {
-            this.rewardSignal = this.rewardSignal - baseReward / 2;
+            this.rewardSignal = this.rewardSignal + bumpHumanReward;
+            negRewards = negRewards + bumpHumanReward;
             moveFactor = 0;
         }
-        
+
         const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
         const newVec = unitOldDir.rotate(newAngle);
         this.dir = newVec;
@@ -686,8 +675,8 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         if (this.intersect = blocks[i].rayIntersect(this.pos, this.dir)) {
             if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
                 this.pos = this.intersect[0].pos;
-                this.rewardSignal = this.rewardSignal - baseReward / 2;
-                negRewards = negRewards - baseReward / 2;
+                this.rewardSignal = this.rewardSignal + bumpWallReward
+                negRewards = negRewards + bumpWallReward;
                 //this.newDir = this.intersect[0].n;
                 this.dir = randomAngle();
                 break;
@@ -699,6 +688,22 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
     }
 
     // if we hit a wall turn arround
+    this.CheckScreenBounds();
+
+
+    if (this.isHuman === true && states.length > 0) {
+        if (agentExperienceResult) {
+            agentExperienceResult.newObservation = states;
+            agentExperienceResult.reward = this.rewardSignal;
+        }
+        totalRewards += this.rewardSignal;
+        rewardOverTime.push(this.rewardSignal);
+        $("#rewardTotal").text(totalRewards);
+        $("#neg-rewards").text(negRewards);
+        this.rewardSignal = 0;
+    }
+}
+Agent.prototype.CheckScreenBounds = function () {
     var bound = false;
     if (this.pos.x < 0) {
         this.pos.x = 1;
@@ -721,31 +726,16 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
         bound = true;
     }
     if (bound) {
-        this.rewardSignal = this.rewardSignal - baseReward / 2;
-        negRewards = negRewards - baseReward / 2;
-        normalize(this.dir);
-    }
-
-
-    if (this.isHuman === true && states.length > 0) {
-        if (agentExperienceResult) {
-            agentExperienceResult.newObservation = states;
-            agentExperienceResult.reward = this.rewardSignal;
-        }
-        totalRewards += this.rewardSignal;
-        rewardOverTime.push(this.rewardSignal);
-        $("#rewardTotal").text(totalRewards);
-        $("#neg-rewards").text(negRewards);
-        this.rewardSignal = 0;
+        this.rewardSignal = this.rewardSignal + bumpScreenReward;
+        negRewards = negRewards + bumpScreenReward;
+        this.dir.normalize();
     }
 }
 Agent.prototype.shoot = (agent) => {
 
     // Draw red line to the closest baddy
-
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.lineWidth = 6;
-
     ctx.moveTo(agent.pos.x, agent.pos.y);
     const sr = agent.eyes[0].sensed_proximity;
     const lineToX = agent.pos.x + sr * agent.dir.x;
@@ -781,8 +771,8 @@ Agent.prototype.shoot = (agent) => {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
         // to do: for now, we disgourage it from stopping and missing.
-        agent.rewardSignal = agent.rewardSignal - baseReward / 10;
-        negRewards = negRewards - baseReward / 10;
+        agent.rewardSignal = agent.rewardSignal + missedShotReward;
+        negRewards = negRewards + missedShotReward;
         missedShots += 1;
         ctx.strokeStyle = 'purple';
     }
@@ -806,43 +796,22 @@ Agent.prototype.draw = function (ctx) {
         ctx.strokeStyle = '#FF0000';
         ctx.stroke();
     }
-    // draw view arc
-    // var dir = Math.atan2(this.dir.y, this.dir.x);
-    // ctx.beginPath();
-    // ctx.arc(this.pos.x, this.pos.y, this.viewDist, dir - this.viewFovD2, dir + this.viewFovD2, false);
-    // ctx.lineTo(this.pos.x, this.pos.y);
-    // ctx.closePath();
-    // ctx.lineWidth = 1;
-    // ctx.stroke();
     var dir = new Vec(this.dir.x, this.dir.y);
-
     ctx.beginPath();
     ctx.moveTo(this.pos.x, this.pos.y);
     ctx.lineTo(this.pos.x + dir.x * this.rad, this.pos.y + dir.y * this.rad);
     ctx.strokeStyle = '#00FFFF';
     ctx.stroke();
-    if (this.intersect) {
-        // ctx.beginPath();
-        // ctx.arc(this.intersect[0].pos.x, this.intersect[0].pos.y, 2, 0, pi2, false);
-        // ctx.fillStyle = '#F00';
-        // ctx.fill();
-        // ctx.beginPath();
-        // ctx.lineWidth = 1;
-        // ctx.moveTo(this.pos.x,this.pos.y);
-        // var n=project(this.pos,this.intersect[0].n,20);
-        // ctx.lineTo(n.x,n.y);
-        // ctx.strokeStyle = '#00FFFF';
-        // ctx.stroke();
-    }
+
 };
-var zCnt = 0;
+let zCnt = 0;
 let hCnt = 0;
-var agents = [];
-var blocks = [];
-var canvas = document.getElementById('canvas');
-var ctx = canvas.getContext('2d');
-var fps = 0;
-var clock = {
+let agents = [];
+const blocks = [];
+const canvas = document.getElementById('canvas');
+let ctx = canvas.getContext('2d');
+let fps = 0;
+const clock = {
     total: 0,
     start: 0,
     time: 0,
@@ -866,13 +835,12 @@ async function mainLoop(time, action, agentExperienceResult) {
     hCnt = 0;
     zCnt = 0;
 
-    for (let i = 0, l = blocks.length; i < l; i++) {
+    for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
-    }
-
+    
     let zombies = agents.filter(agent => agent.isZ);
 
-    if (zombies.length < 3) {
+    if (zombies.length < minZombies) {
         addUnit('zombie');
         zombies = agents.filter(agent => agent.isZ);
     }
@@ -883,7 +851,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     }
 
     let humans = agents.filter(agent => agent.isHuman);
-    if (humans.length < 3) {
+    if (humans.length < minHumans) {
         addUnit('human');
         humans = agents.filter(agent => agent.isHuman);
     }
@@ -948,23 +916,18 @@ class Env {
         };
         loopCount++;
         if (loopCount >= batchSize * 10 || loopCount < 5 || !continueLoop) {
-            if (loopCount >= batchSize * 100) {
-                continueLoop = false;
-            }
-            if (loopCount >= batchSize * 10) {
+            if (loopCount >= batchSize * 10)
                 loopCount = 0;
 
-            }
-
             if (loopCount <= 1) {
-                // const weights = model.actor.getWeights();
-                // const criticWeights = model.critic.getWeights();
-                // const weightsData = weights.map(weight => weight.dataSync());
-                // const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
+                const weights = ppo.actor.getWeights();
+                const criticWeights = ppo.critic.getWeights();
+                const weightsData = weights.map(weight => weight.dataSync());
+                const criticWeightsData = criticWeights.map(criticWeight => criticWeight.dataSync());
 
-                // $("#weights").text(weightsData);
-                // $("#criticWeights").text(criticWeightsData);
-                // $("#current-state").text(states.join(', '));
+                $("#weights").text(weightsData);
+                $("#criticWeights").text(criticWeightsData);
+                $("#current-state").text(states.join(', '));
 
                 createOrUpdateRewardChart(rewardOverTime, batchSize)
                 //await createOrUpdateLossesChart();
@@ -1101,10 +1064,8 @@ async function addUnit(t = 'zombie') {
         id: maxId,
         type: t,
         viewDist: 1000,
-        pos: {
-            x: canvas.width * Math.random(),
-            y: canvas.height * Math.random()
-        }
+        pos: new Vec(canvas.width * Math.random(),canvas.height * Math.random()),
+        
     });
     agents.push(a);
     const humans = agents.filter(a => a.isHuman === true);
@@ -1113,12 +1074,14 @@ async function addUnit(t = 'zombie') {
         h.viewDist = 1000;
     });
 }
+let maxId = 0;
+let ppo = null;
+let isVampire = false;
 window.addEventListener('keydown', (event) => {
     if (event.code === 'Space') {
         continueLoop = !continueLoop;
     }
 });
-let isVampire = false;
 window.addEventListener('keydown', (event) => {
     if (event.code === 'KeyV') {
         isVampire = !isVampire;
@@ -1134,37 +1097,37 @@ window.addEventListener('keydown', (event) => {
         saveModels();
     }
 });
-$('#vampire-button').click(function() {
+$('#vampire-button').click(function () {
     isVampire = !isVampire;
-  });
+});
 
-  $('#rush-watch-button').click(function() {
+$('#rush-watch-button').click(function () {
     continueLoop = !continueLoop;
-  });
+});
 
-$('#save-button').click(async function() {
+$('#save-button').click(async function () {
     await saveModels();
 });
 
-$('#smith-button').click(async function() {
+$('#smith-button').click(async function () {
     const li = agents.findIndex(a => a.isLearning);
     const yi = agents.findIndex(a => !a.isLearning);
-    const l =agents[li];
-    const y =agents[yi];
-    l.isLearning=false;
-    y.isLearning= true;
+    const l = agents[li];
+    const y = agents[yi];
+    l.isLearning = false;
+    y.isLearning = true;
     agents[li] = y;
     agents[yi] = l;
 });
-$('#load-button').click(async function() {
+$('#load-button').click(async function () {
     await loadModels();
 });
-  $('#add-zombie-button').click(async function() {
-   await addUnit('zombie');
-  });
-  $('#add-human-button').click(async function() {
+$('#add-zombie-button').click(async function () {
+    await addUnit('zombie');
+});
+$('#add-human-button').click(async function () {
     await addUnit('human');
-  });
+});
 const loadModels = async () => {
     ppo.actor = await tf.loadLayersModel('indexeddb://zed-tf-actor-current');
     ppo.critic = await tf.loadLayersModel('indexeddb://zed-tf-critic-current');
@@ -1175,8 +1138,7 @@ const saveModels = async () => {
     await ppo.critic.save('indexeddb://zed-tf-critic-current');
 
 }
-let maxId = 0;
-let ppo = null;
+
 (async function () {
 
     $('#gameSpeed').change(function () {
@@ -1226,10 +1188,7 @@ let ppo = null;
             id: i + 1,
             type: i < numHumans ? 'human' : 'zombie',
             viewDist: 1000,
-            pos: {
-                x: canvas.width * Math.random(),
-                y: canvas.height * Math.random()
-            }
+            pos: new Vec(canvas.width * Math.random(),canvas.height * Math.random()),
         }));
         maxId = i + 1;
     }
@@ -1239,22 +1198,8 @@ let ppo = null;
         h.viewDist = 1000;
     });
     const env = new Env();
-    const config = {
-        nSteps: 512,                 // Number of steps to collect rollouts
-        nEpochs: 10,                 // Number of epochs for training the policy and value networks
-        policyLearningRate: .001,    // Learning rate for the policy network
-        valueLearningRate: .001,     // Learning rate for the value network
-        clipRatio: 0.2,              // PPO clipping ratio for the objective function
-        targetKL: 0.05,            // Target KL divergence for early stopping during policy optimization
-        netArch: {
-            'pi': [100, 100],          // Network architecture for the policy network
-            'vf': [100, 100]           // Network architecture for the value network
-        },
-        activation: 'elu',          // Activation function to be used in both policy and value networks
-        verbose: 1                  // Verbosity level (0 for no logging, 1 for logging)
-    }
-    ppo = new PPO(env, config);
-    
+    ppo = new PPO(env, configPpo);
+
     await ppo.learn({
         'totalTimesteps': 10000000,
         'callback': {
