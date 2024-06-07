@@ -21,8 +21,8 @@ let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
-const minHumans = 4;
-const minZombies = 20;
+const minHumans = 3;
+const minZombies = 3;
 
 // Hyperparameters
 const numActions = 11;
@@ -440,6 +440,9 @@ Agent.prototype.getVision = function () {
         ctx.stroke();
 
         let type = e.sensed_type;
+        // clip whether it cares about walls that are far away
+        if(type === -.1 && sr < 100)
+            type=0;
         if (type === 'zombie')
             type = -1;
         if (type === 'human')
@@ -615,9 +618,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
     }
 
     else {
-        if (!states)
-            states = await this.getStates();
-        this.oldStates = [...states];
+        
         let actionSelected;
         if (Math.random() < epsilonGreedy) {
             // Take a random action
@@ -690,6 +691,8 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
 
     if (this.isHuman === true && states.length > 0) {
+        states = await this.getStates();
+        //this.oldStates = [...states];
         const ret = {
             newObservation: states,
             reward: this.rewardSignal,
@@ -871,25 +874,26 @@ async function mainLoop(time, action, agentExperienceResult) {
             // these are the other humans. they use the best action, rather than the proximal action
             let oldStates = [...humans[i].oldStates];
             const states = await humans[i].getStates();
-            if (oldStates.length === 0)
-                oldStates = states;
-            const [preds, probAction, value, logprobability] = await ppo.getSample(oldStates);
-            let action = probAction;
-            humans[i].isLearning =true;
-            if(i>= Math.floor(humans.length/4)){
-                humans[i].isLearning = false;
-                action = tf.argMax(preds).dataSync()[0];
-            }
+
+            const [preds, probAction, value, logprobability] = await ppo.getSample(states);
+
+            const action = tf.argMax(preds).dataSync()[0];
+            // let action = probAction;
+            // humans[i].isLearning =true;
+            // if(i>= Math.floor(humans.length/4)){
+            //     humans[i].isLearning = false;
+            //     action = tf.argMax(preds).dataSync()[0];
+            // }
             const { newObservation, reward } = await humans[i].logic(clock, action, states);
-            //if (i < minHumans) {
-                ppo.buffer.add(
-                    oldStates,
-                    action,
-                    reward,
-                    value,
-                    logprobability
-                );
-            //}
+            // if (i < minHumans) {
+            //     ppo.buffer.add(
+            //         states,
+            //         action,
+            //         reward,
+            //         value,
+            //         logprobability
+            //     );
+            // }
         }
         humans[i].draw(ctx);
     }
@@ -1208,7 +1212,7 @@ const saveModels = async () => {
     }
     //blocks.push(new Square(riverConfig1));
     //blocks.push(new Square(riverConfig2));
-    const maxAgents = 65;//windowArea / 10000;
+    const maxAgents = 50;//windowArea / 10000;
     const numHumans = 50;
     for (let i = 0, l = maxAgents; i < l; i++) {
         agents.push(new Agent({
