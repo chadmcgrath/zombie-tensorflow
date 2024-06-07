@@ -6,8 +6,24 @@ body {
 
 #canvas {
   border:0;
+  background-color: #333; /* This represents the streets */
+    background-image: 
+        linear-gradient(90deg, transparent 24%, rgba(255,255,255,.5) 25%, rgba(255,255,255,.5) 26%, transparent 27%, transparent 74%, rgba(255,255,255,.5) 75%, rgba(255,255,255,.5) 76%, transparent 77%, transparent),
+        linear-gradient(rgba(255,255,255,.5) 2%, rgba(255,255,255,.5) 4%, transparent 5%, transparent 74%, rgba(255,255,255,.5) 75%, rgba(255,255,255,.5) 76%, transparent 77%, transparent);
+
 }
 
+.button-container {
+  display: flex;
+  justify-content: space-between;
+}
+.button-container > div {
+  display: flex;
+  flex-direction: column;
+}
+.btn {
+  margin-bottom: 10px; /* Optional: Adds some space between the buttons */
+}
 .flex-container {
   display: flex;
 }

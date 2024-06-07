@@ -33,14 +33,19 @@
       </div>
     </div>
 
-    <div id="button-container" style="padding-left: 50px;">
-      <button id="vampire-button" class="btn btn-primary">Vampire</button>
-      <button id="rush-watch-button" class="btn btn-primary">Rush/Watch</button>
-      <button id="smith-button" class="btn btn-primary">Move Blue</button>
-      <button id="save-button" class="btn btn-primary">Save</button>
-      <button id="load-button" class="btn btn-primary">Load</button>
-      <button id="add-human-button" class="btn btn-primary">Add Human</button>
-      <button id="add-zombie-button" class="btn btn-primary">Add Zombie</button>
+    <div id="button-container" class="button-container">
+      <div>
+        <button id="add-vampire-button" class="btn btn-primary">Add Vampire</button>
+        <button id="vampire-button" class="btn btn-primary">Vampire</button>
+        <button id="rush-watch-button" class="btn btn-primary">Rush/Watch</button>
+        <button id="smith-button" class="btn btn-primary">Move Blue</button>
+      </div>
+      <div>
+        <button id="save-button" class="btn btn-primary">Save</button>
+        <button id="load-button" class="btn btn-primary">Load</button>
+        <button id="add-human-button" class="btn btn-primary">Add Human</button>
+        <button id="add-zombie-button" class="btn btn-primary">Add Zombie</button>
+      </div>
     </div>
   </div>
   <div id="canvas-container" class="flex-container">
@@ -52,9 +57,9 @@
   <div>
     <label for="slider-batch">BatchSize:</label>
     <span id="batch-value"></span>
-    <input type="range" id="slider-batch" name="slider-batch" min="4" max="1024" step="4" value="512"
+    <input type="range" id="slider-batch" name="slider-batch" min="4" max="2048" step="4" value="1024"
       oninput="showValue(this.value, '#batch-value')">
-    <label for="slider-lr">Learning Rate:</label>
+    <!-- <label for="slider-lr">Learning Rate:</label> -->
     <!-- <span id="lr-value"></span>
     <input type="range" id="slider-lr" name="slider-lr" min=".001" max=".05" step="0.001" value="0.004" oninput="showValue(this.value, '#lr-value')">
     <label for="slider-epsilon">Epsilon-Greedy:</label>
@@ -105,7 +110,6 @@
   <script src='https://cdnjs.cloudflare.com/ajax/libs/jquery/2.2.2/jquery.min.js'></script>
   <script src='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js'></script>
   <script src='https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.6.1/lodash.min.js'></script>
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script> -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="./ppo.js"></script>

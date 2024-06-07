@@ -2,9 +2,10 @@
 /* global $ */
 /* global Chart */
 /* global PPO */
-//tf.enableDebugMode();//
+
 
 /* global tf */
+//tf.enableDebugMode();//
 tf.setBackend('cpu');
 
 
@@ -20,14 +21,14 @@ let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
-const minHumans = 3;
-const minZombies = 3;
+const minHumans = 4;
+const minZombies = 20;
 
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
 let epsilonGreedy = 0;
-const learningRate = .0005;
+const learningRate = .001;
 
 const baseReward = 1;// bites and hit shots
 const missedShotReward = -baseReward / 10;
@@ -166,7 +167,7 @@ const Vec = function (x, y) {
 Vec.prototype = {
 
     // utilities
-    dist_from: function (v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); },
+    distFrom: function (v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); },
     length: function () { return Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2)); },
 
     // new vector returning operations
@@ -329,10 +330,12 @@ function Agent(config) {
     const eyeCount = 30;
     this.eyes = [];
     this.rewardSignal = 0;
+    this.oldStates = [];
 
     const rads = 2 * Math.PI / eyeCount;
     this.isHuman = config.type === 'human';
-    this.isZ = config.type === 'zombie';
+    this.isZ = config.type === 'zombie' || config.type === 'vampire';
+    this.isVampire = config.type === 'vampire';
     this.isShot = false;
     this.isBit = false;
     if (this.isHuman)
@@ -343,7 +346,7 @@ function Agent(config) {
     this.items = [];
 
     this.type = config.type || 'human';
-    this.pos = config.pos || new Vec(0,0);
+    this.pos = config.pos || new Vec(0, 0);
     this.minRad = 10;
     this.rad = 10;
     this.speed = config.speed || this.type === 'human' ? 4 : 2;
@@ -398,7 +401,7 @@ Agent.prototype.getVision = function () {
             if (ei === 0)
                 a.target = res.agent;
 
-            e.sensed_proximity = res.up.dist_from(a.p);
+            e.sensed_proximity = res.up.distFrom(a.p);
             e.sensed_type = res.type;
             if ('vx' in res) {
                 e.vx = res.vx;
@@ -459,12 +462,6 @@ Agent.prototype.getColor = function () {
     if (this.isZ) return 'green';
     return '#AAAAAA';
 };
-Agent.prototype.distTo = function (o) {
-    var dx = o.x - this.pos.x;
-    var dy = o.y - this.pos.y;
-    return Math.sqrt(dx * dx + dy * dy);
-};
-
 
 Agent.prototype.see = function () {
     var seen = [];
@@ -473,7 +470,7 @@ Agent.prototype.see = function () {
         // check if what we see is blocked by a wall   
         a = agents[i];
         if (a === this) continue;
-        d = this.distTo(a.pos);
+        d = this.pos.distFrom(a.pos);
         if (d > this.viewDist) continue;
         ato = Math.atan2(a.pos.y - this.pos.y, a.pos.x - this.pos.x);
         ato = fixAngle(ato);
@@ -525,7 +522,7 @@ Agent.prototype.getStates = async function () {
     const vision = [...this.getVision()];
     return vision;
 }
-Agent.prototype.Zombify = async function (victim, zombie) {
+Agent.prototype.zombify = async function (victim, zombie) {
     console.log('zombifying human: ' + victim.id);
     const p = victim.pos;
     const d = victim.dir;
@@ -539,7 +536,7 @@ Agent.prototype.Zombify = async function (victim, zombie) {
     victim.state = 'idle';
 }
 
-Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResult) {
+Agent.prototype.logic = async function (clock, action, states, agentExperienceResult) {
     let moveFactor = this.isShot ? .1 : 1;
     var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
@@ -575,21 +572,20 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
                     --human.currentHp;
                     human.isBit = true;
 
-                    if (isVampire)
+                    if (isVampire || this.isVampire)
                         ++this.currentHp / 10;
 
                     //tf ml reward
                     human.rewardSignal = human.rewardSignal - baseReward;
                     negRewards = negRewards - baseReward;
                     if (human.currentHp < 1)
-                        await this.Zombify(human, this);
+                        await this.zombify(human, this);
 
                 }
             }
         }
-        if (isVampire)
-            this.rad = Math.max(this.minRad, this.minRad + this.currentHp - this.maxHp);
 
+        this.rad = Math.max(this.minRad, this.minRad + this.currentHp - this.maxHp);
         if (!inMelee && moveFactor === 0) {
             if (this.nextTimer <= 0) {
                 this.state = 'idle';
@@ -618,8 +614,10 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
             this.moveFactor = .1;
     }
 
-    else{
-        states = await this.getStates();
+    else {
+        if (!states)
+            states = await this.getStates();
+        this.oldStates = [...states];
         let actionSelected;
         if (Math.random() < epsilonGreedy) {
             // Take a random action
@@ -692,15 +690,22 @@ Agent.prototype.logic = async function (ctx, clock, action, agentExperienceResul
 
 
     if (this.isHuman === true && states.length > 0) {
+        const ret = {
+            newObservation: states,
+            reward: this.rewardSignal,
+            done: false
+        }
         if (agentExperienceResult) {
             agentExperienceResult.newObservation = states;
             agentExperienceResult.reward = this.rewardSignal;
         }
+
         totalRewards += this.rewardSignal;
         rewardOverTime.push(this.rewardSignal);
         $("#rewardTotal").text(totalRewards);
         $("#neg-rewards").text(negRewards);
         this.rewardSignal = 0;
+        return ret;
     }
 }
 Agent.prototype.CheckScreenBounds = function () {
@@ -810,7 +815,6 @@ let agents = [];
 const blocks = [];
 const canvas = document.getElementById('canvas');
 let ctx = canvas.getContext('2d');
-let fps = 0;
 const clock = {
     total: 0,
     start: 0,
@@ -837,7 +841,7 @@ async function mainLoop(time, action, agentExperienceResult) {
 
     for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
-    
+
     let zombies = agents.filter(agent => agent.isZ);
 
     if (zombies.length < minZombies) {
@@ -846,7 +850,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     }
     for (let i = 0, l = zombies.length; i < l; i++) {
         zCnt++;
-        await zombies[i].logic(ctx, clock);
+        await zombies[i].logic(clock);
         zombies[i].draw(ctx);
     }
 
@@ -859,16 +863,33 @@ async function mainLoop(time, action, agentExperienceResult) {
 
     for (let i = 0, l = humans.length; i < l; i++) {
         if (i === 0) {
-            humans[0].isLearning = true;
-            await humans[0].logic(ctx, clock, action, agentExperienceResult);
+            humans[i].isLearning = true;
+            const states = await humans[0].getStates();
+            await humans[i].logic(clock, action, states, agentExperienceResult);
         }
         else {
-            // these are the other humans
-            const sts = await humans[i].getStates();
-            const statesT = tf.tensor([sts]);
-            const actionProbabilities = await ppo.predict(statesT);
-            const action = tf.argMax(actionProbabilities, 1).dataSync()[0];
-            await humans[i].logic(ctx, clock, action);
+            // these are the other humans. they use the best action, rather than the proximal action
+            let oldStates = [...humans[i].oldStates];
+            const states = await humans[i].getStates();
+            if (oldStates.length === 0)
+                oldStates = states;
+            const [preds, probAction, value, logprobability] = await ppo.getSample(oldStates);
+            let action = probAction;
+            humans[i].isLearning =true;
+            if(i>= Math.floor(humans.length/4)){
+                humans[i].isLearning = false;
+                action = tf.argMax(preds).dataSync()[0];
+            }
+            const { newObservation, reward } = await humans[i].logic(clock, action, states);
+            //if (i < minHumans) {
+                ppo.buffer.add(
+                    oldStates,
+                    action,
+                    reward,
+                    value,
+                    logprobability
+                );
+            //}
         }
         humans[i].draw(ctx);
     }
@@ -876,7 +897,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     ctx.font = '20pt Calibri';
     ctx.lineWidth = 1;
     ctx.fillStyle = 'black';
-    var msg = 'Zed:' + zCnt + '     Hum:' + hCnt + '    ' + 'Time:' + Math.floor(clock.total) + ' FPS ' + fps;
+    var msg = 'Zed:' + zCnt + '     Hum:' + hCnt + '    ' + 'Time:' + Math.floor(clock.total);
     ctx.fillText(msg, ctx.canvas.width / 3 + 1, 21);
     ctx.fillStyle = 'white';
     ctx.fillText(msg, ctx.canvas.width / 3, 20);
@@ -892,12 +913,13 @@ async function mainLoop(time, action, agentExperienceResult) {
     $("#hit-shots-baddy").text(hitShotsBaddy);
     $("#missed-shots").text(missedShots);
     $("#turns").text(totalTurns);
+    return agentExperienceResult;
 }
 class Env {
     constructor() {
         this.actionSpace = {
             'class': 'Discrete',
-            'n': 17,
+            'n': numActions,
         }
         this.observationSpace = {
             'class': 'Box',
@@ -915,11 +937,11 @@ class Env {
             reward: null
         };
         loopCount++;
-        if (loopCount >= batchSize * 10 || loopCount < 5 || !continueLoop) {
-            if (loopCount >= batchSize * 10)
+        if (loopCount > batchSize || !continueLoop) {
+            if (loopCount > batchSize)
                 loopCount = 0;
 
-            if (loopCount <= 1) {
+            if (loopCount < 1) {
                 const weights = ppo.actor.getWeights();
                 const criticWeights = ppo.critic.getWeights();
                 const weightsData = weights.map(weight => weight.dataSync());
@@ -958,6 +980,9 @@ class Env {
     }
     reset() {
         this.i = 0;
+        const states = agents.find(a=> a.isHuman).getStates();
+        if(states.length > 0)
+            return states;
         const array = new Array(this.observationSpace.shape[0]).fill(.1);
         // const  array = Array.from({ length: this.observationSpace.shape[0] }, 
         //     () => new Array(this.observationSpace.shape[1]).fill(.1));
@@ -1064,8 +1089,8 @@ async function addUnit(t = 'zombie') {
         id: maxId,
         type: t,
         viewDist: 1000,
-        pos: new Vec(canvas.width * Math.random(),canvas.height * Math.random()),
-        
+        pos: new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
+
     });
     agents.push(a);
     const humans = agents.filter(a => a.isHuman === true);
@@ -1100,7 +1125,9 @@ window.addEventListener('keydown', (event) => {
 $('#vampire-button').click(function () {
     isVampire = !isVampire;
 });
-
+$('#add-vampire-button').click(function () {
+    addUnit('vampire');
+});
 $('#rush-watch-button').click(function () {
     continueLoop = !continueLoop;
 });
@@ -1111,7 +1138,7 @@ $('#save-button').click(async function () {
 
 $('#smith-button').click(async function () {
     const li = agents.findIndex(a => a.isLearning);
-    const yi = agents.findIndex(a => !a.isLearning);
+    const yi = agents.findIndex(a => !a.isLearning && a.isHuman);
     const l = agents[li];
     const y = agents[yi];
     l.isLearning = false;
@@ -1181,14 +1208,14 @@ const saveModels = async () => {
     }
     //blocks.push(new Square(riverConfig1));
     //blocks.push(new Square(riverConfig2));
-    const maxAgents = 51;//windowArea / 10000;
+    const maxAgents = 65;//windowArea / 10000;
     const numHumans = 50;
     for (let i = 0, l = maxAgents; i < l; i++) {
         agents.push(new Agent({
             id: i + 1,
             type: i < numHumans ? 'human' : 'zombie',
             viewDist: 1000,
-            pos: new Vec(canvas.width * Math.random(),canvas.height * Math.random()),
+            pos: new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
         }));
         maxId = i + 1;
     }

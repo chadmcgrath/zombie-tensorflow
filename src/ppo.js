@@ -136,8 +136,6 @@ class Buffer {
             .concat(this.discountedCumulativeSums(deltas, this.gamma * this.lam))
         this.returnBuffer = this.returnBuffer
             .concat(this.discountedCumulativeSums(rewards, this.gamma).slice(0, -1))
-        this.trajectoryStartIndex = this.pointer
-
     }
 
     get() {
@@ -154,7 +152,8 @@ class Buffer {
             this.actionBuffer,
             this.advantageBuffer,
             this.returnBuffer,
-            this.logprobabilityBuffer
+            this.logprobabilityBuffer,
+            this.pointer,
         ]
     }
 
@@ -397,7 +396,21 @@ class PPO {
         }
         return new BaseCallback() 
     }
-
+    async getSample(lastObservation)
+    {        
+        return tf.tidy(() => {
+            const lastObservationT = tf.tensor([lastObservation])
+            const [predsT, actionT] = this.sampleAction(lastObservationT)
+            const valueT = this.critic.predict(lastObservationT)
+            const logprobabilityT = this.logProb(predsT, actionT)
+            return [
+                predsT.arraySync(), // -> Discrete: [actionSpace.n] or Box: [actionSpace.shape[0]]
+                actionT.arraySync(), // -> Discrete: [] or Box: [actionSpace.shape[0]]
+                valueT.arraySync()[0][0],
+                logprobabilityT.arraySync()
+            ]
+        })
+    }
     async collectRollouts(callback) {
         if (this.lastObservation === null) {
             this.lastObservation = this.env.reset()
@@ -414,21 +427,9 @@ class PPO {
         const allActions = []
         const allClippedActions = []
 
-        for (let step = 0; step < this.config.nSteps; step++) {
+        while(this.buffer.pointer < this.config.nSteps){
             // Predict action, value and logprob from last observation
-            // todo for agent count
-            const [preds, action, value, logprobability] = tf.tidy(() => {
-                const lastObservationT = tf.tensor([this.lastObservation])
-                const [predsT, actionT] = this.sampleAction(lastObservationT)
-                const valueT = this.critic.predict(lastObservationT)
-                const logprobabilityT = this.logProb(predsT, actionT)
-                return [
-                    predsT.arraySync(), // -> Discrete: [actionSpace.n] or Box: [actionSpace.shape[0]]
-                    actionT.arraySync(), // -> Discrete: [] or Box: [actionSpace.shape[0]]
-                    valueT.arraySync()[0][0],
-                    logprobabilityT.arraySync()
-                ]
-            })
+            const [preds, action, value, logprobability] = await this.getSample(this.lastObservation); 
             allPreds.push(preds)
             allActions.push(action)
 
@@ -465,12 +466,13 @@ class PPO {
             
             this.lastObservation = newObservation
             
-            if (done || step === this.config.nSteps - 1) {
+            if (done || this.buffer.pointer > this.config.nSteps - 1) {
                 const lastValue = done 
                     ? 0 
                     : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0]
                 this.buffer.finishTrajectory(lastValue)
                 numEpisodes += 1
+                break;
                 //this.lastObservation = this.env.reset()
             }
         }           
@@ -499,8 +501,7 @@ class PPO {
             tf.tensor(advantageBuffer),
             tf.tensor(returnBuffer).reshape([-1, 1]),
             tf.tensor(logprobabilityBuffer)
-        ])
-
+        ])       
         for (let i = 0; i < this.config.nEpochs; i++) {
             const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT)
             if (kl > 1.5 * this.config.targetKL) {
