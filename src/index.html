@@ -14,7 +14,8 @@
 
 <body>
   <div>
-    <input id="gameSpeed" type="range" min="1" max="20" step="1" value="20" title="Game Speed" />
+    <input id="gameSpeed" type="range" min="1" max="20" step="1" value="4" title="Game Speed"
+      placeholder="Game Speed" />
   </div>
   <div class="flex-container" style="display: flex; justify-content: space-between;">
     <div id="stats-container" class="flex-container">
@@ -35,6 +36,23 @@
 
     <div id="button-container" class="button-container">
       <div>
+        <label for="zombieSpeed">Zombie Speed:</label>
+        <input type="range" id="zombieSpeed" min="0" max="10" step="0.1" value="2">
+        <br>
+        <label for="maxZombieSpeed">Max Zombie Speed:</label>
+        <input type="range" id="maxZombieSpeed" min="0" max="10" step="0.1" value="10">
+        <br>
+        <label for="radius">Radius:</label>
+        <input type="range" id="radius" min="0" max="100" step="1" value="8">
+      </div>
+      <div>
+        <label for="actorInput">Actor Model:</label>
+        <input type="file" id="actorInput" accept=".json">
+        <label for="criticInput">Critic Model:</label>
+        <input type="file" id="criticInput" accept=".json">
+        <button onclick="loadModelFiles()">Load Models</button>
+      </div>
+      <div>
         <button id="add-vampire-button" class="btn btn-primary">Add Vampire</button>
         <button id="vampire-button" class="btn btn-primary">Vampire</button>
         <button id="rush-watch-button" class="btn btn-primary">Rush/Watch</button>
@@ -45,6 +63,7 @@
         <button id="load-button" class="btn btn-primary">Load</button>
         <button id="add-human-button" class="btn btn-primary">Add Human</button>
         <button id="add-zombie-button" class="btn btn-primary">Add Zombie</button>
+
       </div>
     </div>
   </div>
@@ -113,6 +132,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="./ppo.js"></script>
+  <script src="./utilities.js"></script>
   <script src="./scriptMain.js"></script>
 
 </body>

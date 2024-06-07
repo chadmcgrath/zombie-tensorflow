@@ -2,13 +2,24 @@
 /* global $ */
 /* global Chart */
 /* global PPO */
-
+/* global pi2, randomAngle, fixAngle, Square, Vec, stuff_collide */
 
 /* global tf */
 //tf.enableDebugMode();//
 tf.setBackend('cpu');
 
-
+let zCnt = 0;
+let hCnt = 0;
+let agents = [];
+const blocks = [];
+const canvas = document.getElementById('canvas');
+let ctx = canvas.getContext('2d');
+const clock = {
+    total: 0,
+    start: 0,
+    time: 0,
+    delta: 0
+};
 const actorLossValues = [];
 const criticLossValues = [];
 let continueLoop = false;
@@ -21,8 +32,11 @@ let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
-const minHumans = 3;
-const minZombies = 3;
+const buildingHumans= 10;
+const minHumans = 2;
+const minZombies = 1;
+const zombieGreen="#2f402f";
+const zombieHousePos =new Vec(ctx.canvas.width/2, ctx.canvas.height/2);
 
 // Hyperparameters
 const numActions = 11;
@@ -36,10 +50,9 @@ const bumpWallReward = -baseReward / 2;
 const bumpScreenReward = -baseReward / 2;
 const bumpHumanReward = -baseReward / 2;
 const eyeMaxRange = 1000;
-var oneRad = Math.PI / 180;
-var pi2 = Math.PI * 2;
-var gameSpeed = 3;
-var EPS = 0.01;
+
+let gameSpeed = 4;
+
 
 const configPpo = {
     nSteps: batchSize,                 // Number of steps to collect rollouts
@@ -56,265 +69,6 @@ const configPpo = {
     verbose: 0                 // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
 }
 
-function project(v, d, t) {
-    return new Vec(v.x + d.x * t, v.y + d.y * t);
-}
-
-function randomAngle(s) {
-    var r = Math.random() * pi2;
-    if (!s) s = 1;
-    return new Vec(Math.cos(r) * s, Math.sin(r) * s);
-}
-
-function fixAngle(d) {
-    while (d < 0) d += pi2;
-    while (d >= pi2) d -= pi2;
-    return d;
-}
-
-// these act as obstacles
-function Square(config) {
-    this.fill = config.fill || '#CCC';
-    this.stroke = config.stroke || '#000';
-    this.pos = config.pos || {
-        x: (ctx.canvas.width - 20) * Math.random(),
-        y: (ctx.canvas.height - 20) * Math.random()
-    };
-    this.width = config.width || 20 + Math.random() * 100;
-    this.height = config.height || 20 + Math.random() * 100;
-    // extents used for AABB testing
-    this.bounds = [{
-        x: this.pos.x - this.width / 2,
-        y: this.pos.y - this.height / 2
-    }, {
-        x: this.pos.x + this.width / 2,
-        y: this.pos.y + this.height / 2
-    }]
-}
-Square.prototype.draw = function (ctx) {
-    ctx.beginPath();
-    ctx.rect(this.bounds[0].x, this.bounds[0].y, this.width, this.height);
-    ctx.fillStyle = this.fill;
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = this.stroke;
-    ctx.stroke();
-};
-Square.prototype.pointNormal = function (p) {
-    if (Math.abs(p.x - this.bounds[0].x) < EPS) {
-        return {
-            x: -1,
-            y: 0
-        };
-    } else if (Math.abs(p.x - this.bounds[1].x) < EPS) {
-        return {
-            x: 1,
-            y: 0
-        };
-    } else if (Math.abs(p.y - this.bounds[0].y) < EPS) {
-        return {
-            x: 0,
-            y: -1
-        };
-    } else if (Math.abs(p.y - this.bounds[1].y) < EPS) {
-        return {
-            x: 0,
-            y: 1
-        };
-    }
-    return {
-        x: 0,
-        y: 1
-    };
-};
-Square.prototype.rayIntersect = function (o, d) {
-    var tmin, tmax, tymin, tymax;
-    if (d.x >= 0) {
-        tmin = (this.bounds[0].x - o.x) / d.x;
-        tmax = (this.bounds[1].x - o.x) / d.x;
-    } else {
-        tmin = (this.bounds[1].x - o.x) / d.x;
-        tmax = (this.bounds[0].x - o.x) / d.x;
-    }
-    if (d.y >= 0) {
-        tymin = (this.bounds[0].y - o.y) / d.y;
-        tymax = (this.bounds[1].y - o.y) / d.y;
-    } else {
-        tymin = (this.bounds[1].y - o.y) / d.y;
-        tymax = (this.bounds[0].y - o.y) / d.y;
-    }
-    if (tmin > tymax || tymin > tmax) return false;
-    if (tymin > tmin) tmin = tymin;
-    if (tymax < tmax) tmax = tymax;
-    var p1 = {
-        dist: tmin,
-        pos: project(o, d, tmin)
-    };
-    var p2 = {
-        dist: tmax,
-        pos: project(o, d, tmax)
-    };
-    p1.n = this.pointNormal(p1.pos);
-    p2.n = this.pointNormal(p2.pos);
-    return [p1, p2];
-}
-
-// A 2D vector utility (Karpathy)
-const Vec = function (x, y) {
-    this.x = x;
-    this.y = y;
-}
-Vec.prototype = {
-
-    // utilities
-    distFrom: function (v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); },
-    length: function () { return Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2)); },
-
-    // new vector returning operations
-    add: function (v) { return new Vec(this.x + v.x, this.y + v.y); },
-    sub: function (v) { return new Vec(this.x - v.x, this.y - v.y); },
-    rotate: function (a) {  // CLOCKWISE
-        return new Vec(this.x * Math.cos(a) + this.y * Math.sin(a),
-            -this.x * Math.sin(a) + this.y * Math.cos(a));
-    },
-    getAngle: function () { return Math.atan2(this.y, this.x); },
-    getUnit: function () { var d = this.length(); return new Vec(this.x / d, this.y / d); },
-    // in place operations
-    scale: function (s) { this.x *= s; this.y *= s; },
-    normalize: function () { var d = this.length(); this.scale(1.0 / d); }
-}
-
-function line_intersect(line1Start, line1End, line2Start, line2End) {
-    let denominator = ((line2End.y - line2Start.y) * (line1End.x - line1Start.x)) - ((line2End.x - line2Start.x) * (line1End.y - line1Start.y));
-
-    if (denominator === 0) {
-        return false; // lines are parallel
-    }
-
-    let ua = (((line2End.x - line2Start.x) * (line1Start.y - line2Start.y)) - ((line2End.y - line2Start.y) * (line1Start.x - line2Start.x))) / denominator;
-    let ub = (((line1End.x - line1Start.x) * (line1Start.y - line2Start.y)) - ((line1End.y - line1Start.y) * (line1Start.x - line2Start.x))) / denominator;
-
-    if (ua < 0 || ua > 1 || ub < 0 || ub > 1) {
-        return false; // intersection is outside the line segments
-    }
-
-    let x = line1Start.x + ua * (line1End.x - line1Start.x);
-    let y = line1Start.y + ua * (line1End.y - line1Start.y);
-
-    return { ua, ub, up: new Vec(x, y) };
-}
-var line_point_intersect = function (p1, p2, p0, rad) {
-    p0 = new Vec(p0.x, p0.y);
-    var v = new Vec(p2.y - p1.y, -(p2.x - p1.x)); // perpendicular vector
-    var d = Math.abs((p2.x - p1.x) * (p1.y - p0.y) - (p1.x - p0.x) * (p2.y - p1.y));
-    d = d / v.length();
-    if (d > rad) { return false; }
-
-    v.normalize();
-    v.scale(d);
-    var up = p0.add(v);
-    if (!up) {
-        console.log("up empty")
-    }
-    if (Math.abs(p2.x - p1.x) > Math.abs(p2.y - p1.y)) {
-        var ua = (up.x - p1.x) / (p2.x - p1.x);
-    } else {
-        // eslint-disable-next-line no-redeclare
-        var ua = (up.y - p1.y) / (p2.y - p1.y);
-    }
-    if (ua > 0.0 && ua < 1.0) {
-        return { ua: ua, up: up };
-    }
-    return false;
-}
-
-function lineIntersectsSquare(lineStart, lineEnd, square) {
-    let topLeft = { x: square.bounds[0].x, y: square.bounds[0].y };
-    let topRight = { x: square.bounds[1].x, y: square.bounds[0].y };
-    let bottomLeft = { x: square.bounds[0].x, y: square.bounds[1].y };
-    let bottomRight = { x: square.bounds[1].x, y: square.bounds[1].y };
-
-    let sides = [[topLeft, topRight], [topRight, bottomRight], [bottomRight, bottomLeft], [bottomLeft, topLeft]];
-
-    let closestIntersection = null;
-    let minDistance = Infinity;
-
-    for (let side of sides) {
-        let intersection = line_intersect(lineStart, lineEnd, side[0], side[1]);
-        if (intersection) {
-            let dx = lineStart.x - intersection.up.x;
-            let dy = lineStart.y - intersection.up.y;
-            let distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < minDistance) {
-                minDistance = distance;
-                closestIntersection = intersection;
-
-            }
-        }
-    }
-    return closestIntersection ? { ...closestIntersection, distance: minDistance } : false;
-}
-//karpathy collision code- psoibly replace with rayIntersect
-// the original didn't handle buildings properly cuz the original code didn't need to.
-const stuff_collide = (agent, p2, check_walls, check_items) => {
-    var minres = false;
-    p2 = new Vec(p2.x, p2.y);
-    const p1 = agent.p;
-    // collide with walls
-    if (check_walls) {
-
-        const windowWalls = {
-            bounds: [{ x: 0, y: 0, width: window.innerWidth, height: 0 }, // top    
-            { x: window.innerWidth, y: window.innerHeight, width: 0, height: window.innerHeight }]
-        };
-        const allWalls = blocks.concat(windowWalls);
-
-        for (var i = 0, n = allWalls.length; i < n; i++) {
-            var wall = allWalls[i];
-
-            let res = lineIntersectsSquare(p1, p2, wall);
-            if (res) {
-                res.type = -.1; // is wall
-                // Calculate the distance from p1 to the intersection point
-                let dx = p1.x - res.up.x;
-                let dy = p1.y - res.up.y;
-                let distance = Math.sqrt(dx * dx + dy * dy);
-                res.distance = distance;
-
-                if (!minres) { minres = res; }
-                else {
-                    // Check if it's closer
-                    if (res.distance < minres.distance) {
-                        // If yes, replace it
-                        minres = res;
-                    }
-                }
-            }
-        }
-    }
-
-    // collide with items
-    if (check_items) {
-        // eslint-disable-next-line no-redeclare
-        for (var i = 0, n = agent.items.length; i < n; i++) {
-            var it = agent.items[i];
-            var res = line_point_intersect(p1, p2, it.p, it.rad);
-            if (res) {
-                res.vx = it.v.x; // velocty information
-                res.vy = it.v.y;
-
-                res.type = it.isHuman ? 1 : -1; // store type of item
-                res.agent = it;
-                if (!minres) { minres = res; }
-                else {
-                    if (res.ua < minres.ua) { minres = res; }
-                }
-            }
-        }
-    }
-
-    return minres;
-}
 //karpathy
 var Eye = function (angle) {
     this.angle = angle; // angle relative to agent its on
@@ -330,7 +84,6 @@ function Agent(config) {
     const eyeCount = 30;
     this.eyes = [];
     this.rewardSignal = 0;
-    this.oldStates = [];
 
     const rads = 2 * Math.PI / eyeCount;
     this.isHuman = config.type === 'human';
@@ -347,10 +100,9 @@ function Agent(config) {
 
     this.type = config.type || 'human';
     this.pos = config.pos || new Vec(0, 0);
-    this.minRad = 10;
-    this.rad = 10;
+    this.minRad = config.rad || 8;
+    this.rad = config.rad || 8;
     this.speed = config.speed || this.type === 'human' ? 4 : 2;
-    this.turnSpeed = config.turnSpeed || this.type === 'human' ? oneRad * 2 : oneRad;
     this.dir = randomAngle();
     this.newDir = this.dir.getUnit();
 
@@ -369,7 +121,7 @@ function Agent(config) {
     //
     this.state = config.state || 'idle';
     this.viewDist = config.viewDist || 1000;
-    this.viewFov = (config.viewFov || this.type === 'human' ? 90 : 90) * oneRad;
+    this.viewFov = (config.viewFov || Math.PI/4);
     this.viewFovD2 = this.viewFov / 2;
     this.nextTimer = Math.random() * 10;
     this.ring = config.ring || this.type === 'human' ? 0 : 5;
@@ -395,7 +147,7 @@ Agent.prototype.getVision = function () {
             console.error('eyep.x is NaN');
         }
 
-        var res = stuff_collide(a, eyep, true, true);
+        var res = stuff_collide(a, eyep, blocks, true, true);
         if (res) {
             // eye collided with anything
             if (ei === 0)
@@ -441,8 +193,8 @@ Agent.prototype.getVision = function () {
 
         let type = e.sensed_type;
         // clip whether it cares about walls that are far away
-        if(type === -.1 && sr < 100)
-            type=0;
+        if (type === -.1 && sr < 100)
+            type = 0;
         if (type === 'zombie')
             type = -1;
         if (type === 'human')
@@ -450,6 +202,8 @@ Agent.prototype.getVision = function () {
 
         // add to state for ML
         // tensorflow inputs
+        // we may only need distance here, and let the nn figure out the rest
+        // based on which eye sense the object
         eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
     }
     //}
@@ -589,6 +343,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
         }
 
         this.rad = Math.max(this.minRad, this.minRad + this.currentHp - this.maxHp);
+        // try wandering if its stuck
         if (!inMelee && moveFactor === 0) {
             if (this.nextTimer <= 0) {
                 this.state = 'idle';
@@ -618,7 +373,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
     }
 
     else {
-        
+
         let actionSelected;
         if (Math.random() < epsilonGreedy) {
             // Take a random action
@@ -632,8 +387,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
         let newAngle = 0;
         const numAngles = numActions - 2;
         if (actionSelected < numAngles) {
-            const predictedActionVal = (actionSelected - (Math.floor(numActions / 2))) * (360 / 30) * oneRad;
-            newAngle = predictedActionVal;
+            newAngle = (actionSelected - (Math.floor(numAngles/ 2))) * (2 * Math.PI / this.eyes.length);
         } else if (actionSelected === (numActions - 2)) {
             newAngle = Math.PI;
         }
@@ -688,7 +442,6 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
     // if we hit a wall turn arround
     this.CheckScreenBounds();
-
 
     if (this.isHuman === true && states.length > 0) {
         states = await this.getStates();
@@ -812,18 +565,6 @@ Agent.prototype.draw = function (ctx) {
     ctx.stroke();
 
 };
-let zCnt = 0;
-let hCnt = 0;
-let agents = [];
-const blocks = [];
-const canvas = document.getElementById('canvas');
-let ctx = canvas.getContext('2d');
-const clock = {
-    total: 0,
-    start: 0,
-    time: 0,
-    delta: 0
-};
 
 async function mainLoop(time, action, agentExperienceResult) {
     if (!time) {
@@ -844,11 +585,17 @@ async function mainLoop(time, action, agentExperienceResult) {
 
     for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
-
+    if(totalTurns >10000 && totalTurns % 1000 === 0){
+        const numZombs = Math.min((totalTurns - 10000)/2000, 100);
+        for (let i = 0; i < numZombs; i++) {            
+            addUnit({type:'zombie', pos:zombieHousePos, speed: Math.min(2 + totalTurns/10000, 5)});
+        }
+        //addUnit({type:'human', pos:new Vec(0,0)});
+    }
     let zombies = agents.filter(agent => agent.isZ);
 
     if (zombies.length < minZombies) {
-        addUnit('zombie');
+        addUnit({type:'zombie', pos:zombieHousePos, speed: Math.min(2 + totalTurns/10000, 5)});
         zombies = agents.filter(agent => agent.isZ);
     }
     for (let i = 0, l = zombies.length; i < l; i++) {
@@ -856,10 +603,12 @@ async function mainLoop(time, action, agentExperienceResult) {
         await zombies[i].logic(clock);
         zombies[i].draw(ctx);
     }
-
+    
     let humans = agents.filter(agent => agent.isHuman);
     if (humans.length < minHumans) {
-        addUnit('human');
+        // get random building, human comes out of it
+        const block = blocks[Math.floor(Math.random() * blocks.length)];
+        addUnit({type:'human', pos:new Vec(block.pos.x,block.pos.y)});
         humans = agents.filter(agent => agent.isHuman);
     }
     hCnt = humans.length;
@@ -872,28 +621,11 @@ async function mainLoop(time, action, agentExperienceResult) {
         }
         else {
             // these are the other humans. they use the best action, rather than the proximal action
-            let oldStates = [...humans[i].oldStates];
             const states = await humans[i].getStates();
-
-            const [preds, probAction, value, logprobability] = await ppo.getSample(states);
-
-            const action = tf.argMax(preds).dataSync()[0];
-            // let action = probAction;
-            // humans[i].isLearning =true;
-            // if(i>= Math.floor(humans.length/4)){
-            //     humans[i].isLearning = false;
-            //     action = tf.argMax(preds).dataSync()[0];
-            // }
-            const { newObservation, reward } = await humans[i].logic(clock, action, states);
-            // if (i < minHumans) {
-            //     ppo.buffer.add(
-            //         states,
-            //         action,
-            //         reward,
-            //         value,
-            //         logprobability
-            //     );
-            // }
+            const [preds, ,,,] = await ppo.getSample(states);
+            humans[i].isLearning = false;
+            const action = tf.argMax(preds).dataSync()[0];         
+            await humans[i].logic(clock, action, states);           
         }
         humans[i].draw(ctx);
     }
@@ -972,7 +704,8 @@ class Env {
                 stroke: function () { },
                 // Add any other methods you use
             };
-            // this isn't detecing the spacebar while the thrrad is blocked by the loop
+            // this isn't detecing the spacebar right away while the thread is blocked by the loop
+            // i think it's worse when running tensorflow off of gpu
             if (loopCount >= batchSize * 10) {
                 loopCount = 0;
                 continueLoop = false;
@@ -984,12 +717,10 @@ class Env {
     }
     reset() {
         this.i = 0;
-        const states = agents.find(a=> a.isHuman).getStates();
-        if(states.length > 0)
+        const states = agents.find(a => a.isHuman).getStates();
+        if (states.length > 0)
             return states;
         const array = new Array(this.observationSpace.shape[0]).fill(.1);
-        // const  array = Array.from({ length: this.observationSpace.shape[0] }, 
-        //     () => new Array(this.observationSpace.shape[1]).fill(.1));
         return array;
     }
 }
@@ -1087,13 +818,15 @@ async function removeUnit(unit) {
     }
     agents = agents.filter(a => a !== unit);
 }
-async function addUnit(t = 'zombie') {
+async function addUnit(config) {
     ++maxId;
     const a = new Agent({
         id: maxId,
-        type: t,
+        type: config.type || 'zombie',
         viewDist: 1000,
-        pos: new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
+        pos: config.pos || new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
+        speed: config.speed || null,
+        
 
     });
     agents.push(a);
@@ -1130,7 +863,7 @@ $('#vampire-button').click(function () {
     isVampire = !isVampire;
 });
 $('#add-vampire-button').click(function () {
-    addUnit('vampire');
+    addUnit({type:'vampire'});
 });
 $('#rush-watch-button').click(function () {
     continueLoop = !continueLoop;
@@ -1154,22 +887,67 @@ $('#load-button').click(async function () {
     await loadModels();
 });
 $('#add-zombie-button').click(async function () {
-    await addUnit('zombie');
+    await addUnit({type:'zombie'});
 });
 $('#add-human-button').click(async function () {
-    await addUnit('human');
+    await addUnit({type:'human'});
 });
 const loadModels = async () => {
+    // const name = 'zed-tf'
+    // ppo.actor = await tf.loadLayersModel('indexeddb://actor-'+ name);
+    // ppo.critic = await tf.loadLayersModel('indexeddb://critic-'+ name);
+    //const name = 'zed-tf';
     ppo.actor = await tf.loadLayersModel('indexeddb://zed-tf-actor-current');
     ppo.critic = await tf.loadLayersModel('indexeddb://zed-tf-critic-current');
-
 }
 const saveModels = async () => {
-    await ppo.actor.save('indexeddb://zed-tf-actor-current');
-    await ppo.critic.save('indexeddb://zed-tf-critic-current');
+    const name = 'zed-tf'
+    await ppo.actor.save('indexeddb://actor-' + name);
+    await ppo.critic.save('indexeddb://critic-' + name);
+    console.log('saved to indexxed db: ' + name);
+    await saveToFiles(name);
 
 }
+const saveToFiles = async () => {
 
+    await ppo.actor.save('downloads://actor-'+name);
+    await ppo.critic.save('downloads://critic-'+name);
+}
+const loadModelFiles = async () => {
+    const actorInput = document.getElementById('actorInput');
+    const criticInput = document.getElementById('criticInput');
+
+    const actorFile = actorInput.files[0];
+    const criticFile = criticInput.files[0];
+
+    const actorUrl = URL.createObjectURL(actorFile);
+    const criticUrl = URL.createObjectURL(criticFile);
+
+    ppo.actor = await tf.loadLayersModel(actorUrl);
+    ppo.critic = await tf.loadLayersModel(criticUrl);
+}
+const zombieSpeedElement =$('#zombieSpeed');
+//zombieSpeedElement.addEventListener('change', updateZombieSpeed);
+//let zombieSpeed
+//$('#maxZombieSpeed').addEventListener('change', updateMaxZombieSpeed);
+//$('#radius').addEventListener('change', updateRadius);
+// document.getElementById('actorInput').addEventListener('change', loadActorModel);
+// document.getElementById('criticInput').addEventListener('change', loadCriticModel);
+
+function updateZombieSpeed(event) {
+    const zombieSpeed = event.target.value;
+    // Update minZombieSpeed in your application
+}
+
+function updateMaxZombieSpeed(event) {
+    const maxZombieSpeed = event.target.value;
+    // Update maxZombieSpeed in your application
+}
+
+function updateRadius(event) {
+    const radius = event.target.value;
+    // Update radius in your application
+}
 (async function () {
 
     $('#gameSpeed').change(function () {
@@ -1185,8 +963,17 @@ const saveModels = async () => {
     const windowArea = $(window).width() * $(window).height();
     const blockNum = windowArea / 50000;
     for (let i = 0, l = blockNum; i < l; i++) {
-        blocks.push(new Square({}));
+        blocks.push(new Square({}, ctx));
     }
+    const zombieHouseConfig = {
+        fill: zombieGreen,
+        stroke: 'olive',
+
+        pos: zombieHousePos,
+        width: ctx.canvas.height / 10,
+        height: ctx.canvas.height/10,
+    }
+    blocks.push(new Square(zombieHouseConfig, ctx));
     // not sure how the height works for drawing the square but I'll wing it
     const riverConfig1 = {
         fill: "blue",
@@ -1212,7 +999,7 @@ const saveModels = async () => {
     }
     //blocks.push(new Square(riverConfig1));
     //blocks.push(new Square(riverConfig2));
-    const maxAgents = 50;//windowArea / 10000;
+    const maxAgents = 53;//windowArea / 10000;
     const numHumans = 50;
     for (let i = 0, l = maxAgents; i < l; i++) {
         agents.push(new Agent({
