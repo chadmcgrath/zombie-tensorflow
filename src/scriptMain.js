@@ -20,6 +20,8 @@ const clock = {
     time: 0,
     delta: 0
 };
+const numEyes=30;
+const numInputs = numEyes * 3;
 const actorLossValues = [];
 const criticLossValues = [];
 let continueLoop = false;
@@ -34,10 +36,10 @@ let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
 const buildingHumans= 10;
 const minHumans = 2;
-const minZombies = 1;
+const minZombies = 3;
 const zombieGreen="#2f402f";
 const zombieHousePos =new Vec(ctx.canvas.width/2, ctx.canvas.height/2);
-
+const zombieSpeed=1;
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
@@ -48,7 +50,7 @@ const baseReward = 1;// bites and hit shots
 const missedShotReward = -baseReward / 10;
 const bumpWallReward = -baseReward / 2;
 const bumpScreenReward = -baseReward / 2;
-const bumpHumanReward = -baseReward / 2;
+const bumpHumanReward = -baseReward / 4;
 const eyeMaxRange = 1000;
 
 let gameSpeed = 4;
@@ -62,8 +64,8 @@ const configPpo = {
     clipRatio: 0.2,              //.2- PPO clipping ratio for the objective function
     targetKL: 0.02,            // .01-Target KL divergence for early stopping during policy optimization
     netArch: {
-        'pi': [100, 100],          // Network architecture for the policy network
-        'vf': [100, 100]           // Network architecture for the value network
+        'pi': [numInputs, numInputs],           // Network architecture for the policy network
+        'vf': [numInputs, numInputs]           // Network architecture for the value network
     },
     activation: 'elu',          // Activation function to be used in both policy and value networks
     verbose: 0                 // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
@@ -81,7 +83,7 @@ function Agent(config) {
     this.id = config.id;
     this.isLearning = false;
     const maxHp = 50;
-    const eyeCount = 30;
+    const eyeCount = numEyes;
     this.eyes = [];
     this.rewardSignal = 0;
 
@@ -102,8 +104,8 @@ function Agent(config) {
     this.pos = config.pos || new Vec(0, 0);
     this.minRad = config.rad || 8;
     this.rad = config.rad || 8;
-    this.speed = config.speed || this.type === 'human' ? 4 : 2;
-    this.dir = randomAngle();
+    this.speed = config.speed || (this.isHuman ? 4 : zombieSpeed);
+    this.dir = this.isHuman ? new Vec(1,0) : randomAngle();
     this.newDir = this.dir.getUnit();
 
     //todo: remove duplicate position
@@ -121,7 +123,7 @@ function Agent(config) {
     //
     this.state = config.state || 'idle';
     this.viewDist = config.viewDist || 1000;
-    this.viewFov = (config.viewFov || Math.PI/4);
+    this.viewFov = (config.viewFov || Math.PI/2);
     this.viewFovD2 = this.viewFov / 2;
     this.nextTimer = Math.random() * 10;
     this.ring = config.ring || this.type === 'human' ? 0 : 5;
@@ -586,16 +588,16 @@ async function mainLoop(time, action, agentExperienceResult) {
     for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
     if(totalTurns >10000 && totalTurns % 1000 === 0){
-        const numZombs = Math.min((totalTurns - 10000)/2000, 100);
+        const numZombs = Math.min((totalTurns - 20000)/2000, 100);
         for (let i = 0; i < numZombs; i++) {            
-            addUnit({type:'zombie', pos:zombieHousePos, speed: Math.min(2 + totalTurns/10000, 5)});
+            addUnit({type:'zombie', pos:zombieHousePos, speed: Math.min(zombieSpeed + totalTurns/40000,3)});
         }
         //addUnit({type:'human', pos:new Vec(0,0)});
     }
     let zombies = agents.filter(agent => agent.isZ);
 
     if (zombies.length < minZombies) {
-        addUnit({type:'zombie', pos:zombieHousePos, speed: Math.min(2 + totalTurns/10000, 5)});
+        addUnit({type:'zombie', pos:zombieHousePos, speed: zombieSpeed});
         zombies = agents.filter(agent => agent.isZ);
     }
     for (let i = 0, l = zombies.length; i < l; i++) {
@@ -659,7 +661,7 @@ class Env {
         }
         this.observationSpace = {
             'class': 'Box',
-            'shape': [90],
+            'shape': [numInputs],
             'dtype': 'float32',
         }
         this.resets = 0
@@ -1006,7 +1008,8 @@ function updateRadius(event) {
             id: i + 1,
             type: i < numHumans ? 'human' : 'zombie',
             viewDist: 1000,
-            pos: new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
+            pos: i===0? new Vec(canvas.width/2, canvas.height/2)
+                :new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
         }));
         maxId = i + 1;
     }
@@ -1017,7 +1020,6 @@ function updateRadius(event) {
     });
     const env = new Env();
     ppo = new PPO(env, configPpo);
-
     await ppo.learn({
         'totalTimesteps': 10000000,
         'callback': {
@@ -1026,7 +1028,5 @@ function updateRadius(event) {
             }
         }
     })
-
-
 })();
 
