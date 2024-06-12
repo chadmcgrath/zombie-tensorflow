@@ -20,7 +20,7 @@ const clock = {
     time: 0,
     delta: 0
 };
-const numEyes=30;
+const numEyes = 30;
 const numInputs = numEyes * 3;
 const actorLossValues = [];
 const criticLossValues = [];
@@ -34,12 +34,12 @@ let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
-const buildingHumans= 10;
+const buildingHumans = 10;
 const minHumans = 2;
 const minZombies = 3;
-const zombieGreen="#2f402f";
-const zombieHousePos =new Vec(ctx.canvas.width/2, ctx.canvas.height/2);
-const zombieSpeed=1;
+const zombieGreen = "#2f402f";
+const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
+const zombieSpeed = 1;
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
@@ -47,7 +47,7 @@ let epsilonGreedy = 0;
 const learningRate = .001;
 
 const baseReward = 1;// bites and hit shots
-const missedShotReward = -baseReward / 10;
+const missedShotReward = -baseReward / 8;
 const bumpWallReward = -baseReward / 2;
 const bumpScreenReward = -baseReward / 2;
 const bumpHumanReward = -baseReward / 4;
@@ -67,20 +67,30 @@ const configPpo = {
         'pi': [numInputs, numInputs],           // Network architecture for the policy network
         'vf': [numInputs, numInputs]           // Network architecture for the value network
     },
-    activation: 'elu',          // Activation function to be used in both policy and value networks
+    activation: 'tanh',          //relu, elu Activation function to be used in both policy and value networks
     verbose: 0                 // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
 }
-
-//karpathy
+const zombieMoveFrames = [];
+const zombieAttackFrames = [];
+for (let i = 0; i < 17; i++) {  // Replace 10 with the number of images you have
+    zombieMoveFrames[i] = new Image();
+    zombieMoveFrames[i].src = `img/skeleton/skeleton-move-${i}.png`;  // Adjust the path and filename as needed
+}
+for (let i = 0; i < 9; i++) {  // Replace 10 with the number of images you have
+    zombieAttackFrames[i] = new Image();
+    zombieAttackFrames[i].src = `img/skeleton/skeleton-attack-${i}.png`;  // Adjust the path and filename as needed
+}
+//karpathy's eye
 var Eye = function (angle) {
     this.angle = angle; // angle relative to agent its on
     this.max_range = eyeMaxRange;
-    this.sensed_proximity = eyeMaxRange; // what the eye is seeing. will be set in world.tick()
+    this.sensed_proximity = eyeMaxRange;
     this.sensed_type = 0; // what does the eye see?
 
 }
 function Agent(config) {
     this.id = config.id;
+    this.experiences = [];
     this.isLearning = false;
     const maxHp = 50;
     const eyeCount = numEyes;
@@ -105,7 +115,7 @@ function Agent(config) {
     this.minRad = config.rad || 8;
     this.rad = config.rad || 8;
     this.speed = config.speed || (this.isHuman ? 4 : zombieSpeed);
-    this.dir = this.isHuman ? new Vec(1,0) : randomAngle();
+    this.dir = this.isHuman ? new Vec(1, 0) : randomAngle();
     this.newDir = this.dir.getUnit();
 
     //todo: remove duplicate position
@@ -123,7 +133,7 @@ function Agent(config) {
     //
     this.state = config.state || 'idle';
     this.viewDist = config.viewDist || 1000;
-    this.viewFov = (config.viewFov || Math.PI/2);
+    this.viewFov = (config.viewFov || Math.PI / 2);
     this.viewFovD2 = this.viewFov / 2;
     this.nextTimer = Math.random() * 10;
     this.ring = config.ring || this.type === 'human' ? 0 : 5;
@@ -132,7 +142,6 @@ function Agent(config) {
 Agent.prototype.getVision = function () {
 
     let eyeStates = [];
-    //for (let i = 0, n = this.agents.length; i < n; i++) {
     var a = this;
     a.target = null;
     const pos = a.p;
@@ -171,6 +180,9 @@ Agent.prototype.getVision = function () {
             e.vy = 0;
         }
         ctx.strokeStyle = "rgb(0,0,0,0)";
+
+
+
         // ctx.strokeStyle = "rgb(255,150,150)";
         // if (e.sensed_type === -.1) {
         //     ctx.strokeStyle = "yellow"; // wall
@@ -309,6 +321,8 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
     // bite and maybe convert humans to zombie
     if (this.isHuman === false) {
+        //ctx.drawImage(frames[frameIndex], 0, 0);
+        //frameIndex = (frameIndex + 1) % frames.length;
         let inMelee = false;
         this.state = 'idle';
 
@@ -389,7 +403,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
         let newAngle = 0;
         const numAngles = numActions - 2;
         if (actionSelected < numAngles) {
-            newAngle = (actionSelected - (Math.floor(numAngles/ 2))) * (2 * Math.PI / this.eyes.length);
+            newAngle = (actionSelected - (Math.floor(numAngles / 2))) * (2 * Math.PI / this.eyes.length);
         } else if (actionSelected === (numActions - 2)) {
             newAngle = Math.PI;
         }
@@ -447,7 +461,6 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
     if (this.isHuman === true && states.length > 0) {
         states = await this.getStates();
-        //this.oldStates = [...states];
         const ret = {
             newObservation: states,
             reward: this.rewardSignal,
@@ -587,17 +600,16 @@ async function mainLoop(time, action, agentExperienceResult) {
 
     for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
-    if(totalTurns >10000 && totalTurns % 1000 === 0){
-        const numZombs = Math.min((totalTurns - 20000)/2000, 100);
-        for (let i = 0; i < numZombs; i++) {            
-            addUnit({type:'zombie', pos:zombieHousePos, speed: Math.min(zombieSpeed + totalTurns/40000,3)});
+    if (totalTurns > 10000 && totalTurns % 1000 === 0) {
+        const numZombs = Math.min((totalTurns - 10000) / 2000, 100);
+        for (let i = 0; i < numZombs; i++) {
+            addUnit({ type: 'zombie', pos: zombieHousePos, speed: Math.min(zombieSpeed + totalTurns / 40000, 3) });
         }
-        //addUnit({type:'human', pos:new Vec(0,0)});
     }
     let zombies = agents.filter(agent => agent.isZ);
 
     if (zombies.length < minZombies) {
-        addUnit({type:'zombie', pos:zombieHousePos, speed: zombieSpeed});
+        addUnit({ type: 'zombie', pos: zombieHousePos, speed: zombieSpeed });
         zombies = agents.filter(agent => agent.isZ);
     }
     for (let i = 0, l = zombies.length; i < l; i++) {
@@ -605,12 +617,12 @@ async function mainLoop(time, action, agentExperienceResult) {
         await zombies[i].logic(clock);
         zombies[i].draw(ctx);
     }
-    
+
     let humans = agents.filter(agent => agent.isHuman);
     if (humans.length < minHumans) {
         // get random building, human comes out of it
         const block = blocks[Math.floor(Math.random() * blocks.length)];
-        addUnit({type:'human', pos:new Vec(block.pos.x,block.pos.y)});
+        addUnit({ type: 'human', pos: new Vec(block.pos.x, block.pos.y) });
         humans = agents.filter(agent => agent.isHuman);
     }
     hCnt = humans.length;
@@ -624,10 +636,35 @@ async function mainLoop(time, action, agentExperienceResult) {
         else {
             // these are the other humans. they use the best action, rather than the proximal action
             const states = await humans[i].getStates();
-            const [preds, ,,,] = await ppo.getSample(states);
+            const [preds, actionProximal, value, logprobability] = await ppo.getSample(states);
             humans[i].isLearning = false;
-            const action = tf.argMax(preds).dataSync()[0];         
-            await humans[i].logic(clock, action, states);           
+            const action = tf.argMax(preds).dataSync()[0];
+            const rets = await humans[i].logic(clock, action, states);
+            if (i < 0) {
+                // hack to add argMax agent to add to buffer in seequence
+                humans[i].experiences.push([states,
+                    action,
+                    rets.reward,
+                    value,
+                    logprobability]);
+
+                if (ppo.buffer.pointer === 0 && totalTurns >0) {
+                    for (const [states,
+                        action,
+                        reward,
+                        value,
+                        logprobability] of humans[i].experiences) {
+                        ppo.buffer.add(
+                            states,
+                            action,
+                            reward,
+                            value,
+                            logprobability);
+                    };
+                    humans[i].experiences=[];
+
+                }
+            }
         }
         humans[i].draw(ctx);
     }
@@ -768,7 +805,6 @@ async function createOrUpdateLossesChart() {
         lossesChart.data.labels = actorLossValues.map((_, i) => i + 1);
         lossesChart.data.datasets[0].data = actorLossValues;
         lossesChart.data.datasets[1].data = criticLossValues;
-
         lossesChart.update();
     }
 }
@@ -828,7 +864,6 @@ async function addUnit(config) {
         viewDist: 1000,
         pos: config.pos || new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
         speed: config.speed || null,
-        
 
     });
     agents.push(a);
@@ -865,7 +900,7 @@ $('#vampire-button').click(function () {
     isVampire = !isVampire;
 });
 $('#add-vampire-button').click(function () {
-    addUnit({type:'vampire'});
+    addUnit({ type: 'vampire' });
 });
 $('#rush-watch-button').click(function () {
     continueLoop = !continueLoop;
@@ -889,18 +924,18 @@ $('#load-button').click(async function () {
     await loadModels();
 });
 $('#add-zombie-button').click(async function () {
-    await addUnit({type:'zombie'});
+    await addUnit({ type: 'zombie' });
 });
 $('#add-human-button').click(async function () {
-    await addUnit({type:'human'});
+    await addUnit({ type: 'human' });
 });
 const loadModels = async () => {
-    // const name = 'zed-tf'
-    // ppo.actor = await tf.loadLayersModel('indexeddb://actor-'+ name);
-    // ppo.critic = await tf.loadLayersModel('indexeddb://critic-'+ name);
+    const name = 'zed-tf'
+    ppo.actor = await tf.loadLayersModel('indexeddb://actor-' + name);
+    ppo.critic = await tf.loadLayersModel('indexeddb://critic-' + name);
     //const name = 'zed-tf';
-    ppo.actor = await tf.loadLayersModel('indexeddb://zed-tf-actor-current');
-    ppo.critic = await tf.loadLayersModel('indexeddb://zed-tf-critic-current');
+    // ppo.actor = await tf.loadLayersModel('indexeddb://zed-tf-actor-current');
+    // ppo.critic = await tf.loadLayersModel('indexeddb://zed-tf-critic-current');
 }
 const saveModels = async () => {
     const name = 'zed-tf'
@@ -912,8 +947,8 @@ const saveModels = async () => {
 }
 const saveToFiles = async () => {
 
-    await ppo.actor.save('downloads://actor-'+name);
-    await ppo.critic.save('downloads://critic-'+name);
+    await ppo.actor.save('downloads://actor-' + name);
+    await ppo.critic.save('downloads://critic-' + name);
 }
 const loadModelFiles = async () => {
     const actorInput = document.getElementById('actorInput');
@@ -928,7 +963,7 @@ const loadModelFiles = async () => {
     ppo.actor = await tf.loadLayersModel(actorUrl);
     ppo.critic = await tf.loadLayersModel(criticUrl);
 }
-const zombieSpeedElement =$('#zombieSpeed');
+const zombieSpeedElement = $('#zombieSpeed');
 //zombieSpeedElement.addEventListener('change', updateZombieSpeed);
 //let zombieSpeed
 //$('#maxZombieSpeed').addEventListener('change', updateMaxZombieSpeed);
@@ -947,7 +982,7 @@ function updateMaxZombieSpeed(event) {
 }
 
 function updateRadius(event) {
-    const radius = event.target.value;
+    radius = event.target.value;
     // Update radius in your application
 }
 (async function () {
@@ -973,7 +1008,7 @@ function updateRadius(event) {
 
         pos: zombieHousePos,
         width: ctx.canvas.height / 10,
-        height: ctx.canvas.height/10,
+        height: ctx.canvas.height / 10,
     }
     blocks.push(new Square(zombieHouseConfig, ctx));
     // not sure how the height works for drawing the square but I'll wing it
@@ -1008,8 +1043,8 @@ function updateRadius(event) {
             id: i + 1,
             type: i < numHumans ? 'human' : 'zombie',
             viewDist: 1000,
-            pos: i===0? new Vec(canvas.width/2, canvas.height/2)
-                :new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
+            pos: i === 0 ? new Vec(canvas.width / 2, canvas.height / 2)
+                : new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
         }));
         maxId = i + 1;
     }
