@@ -17,20 +17,34 @@ function fixAngle(d) {
     while (d >= pi2) d -= pi2;
     return d;
 }
+function createGrid(ctx, minX, maxX, minY, maxY, z) {
+    const canvasWidth = ctx.canvas.width;
+    const canvasHeight = ctx.canvas.height;
+    const squares = [];
 
-// these act as obstacles
-function Square(config, ctx) {
+    for (let i = 0; i < canvasWidth; i += maxX + z) {
+        for (let j = 0; j < canvasHeight; j += maxY + z) {
+            const width = Math.random() * (maxX - minX) + minX;
+            const height = Math.random() * (maxY - minY) + minY;
+            const square = new Square({
+                pos: { x: i + width / 2, y: j + height / 2 },
+                width: width,
+                height: height
+            });
+            squares.push(square);
+        }
+    }
+
+    return squares;
+}
+function Square(config) {
     this.fill = config.fill || '#CCC';
     this.stroke = config.stroke || '#000';
+
     const randomHeight = Math.random() * 100;
     const randomWidth = Math.random() * 100;
-    const randomX = Math.random() * ctx.canvas.width;
-    const randomY = Math.random() * ctx.canvas.height;
     
-    this.pos = config.pos || {
-        x: randomX,
-        y: randomY
-    };
+    this.pos = config.pos;
     this.width = config.width || randomWidth+ 20;
     this.height = config.height || randomHeight+ 20;
     this.bounds = [{
@@ -40,7 +54,41 @@ function Square(config, ctx) {
         x: this.pos.x + this.width / 2,
         y: this.pos.y + this.height / 2
     }]
+    
 }
+
+Square.prototype.draw = function (ctx) {
+    ctx.beginPath();
+    ctx.rect(this.pos.x - this.width / 2, this.pos.y - this.height / 2, this.width, this.height);
+    ctx.fillStyle = this.fill;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = this.stroke;
+    ctx.stroke();
+};
+//these act as obstacles
+// function Square(config, ctx) {
+//     this.fill = config.fill || '#CCC';
+//     this.stroke = config.stroke || '#000';
+//     const randomHeight = Math.random() * 100;
+//     const randomWidth = Math.random() * 100;
+//     const randomX = Math.random() * ctx.canvas.width;
+//     const randomY = Math.random() * ctx.canvas.height;
+    
+//     this.pos = config.pos || {
+//         x: randomX,
+//         y: randomY
+//     };
+//     this.width = config.width || randomWidth+ 20;
+//     this.height = config.height || randomHeight+ 20;
+//     this.bounds = [{
+//         x: this.pos.x - this.width / 2,
+//         y: this.pos.y - this.height / 2
+//     }, {
+//         x: this.pos.x + this.width / 2,
+//         y: this.pos.y + this.height / 2
+//     }]
+// }
 Square.prototype.draw = function (ctx) {
     ctx.beginPath();
     ctx.rect(this.bounds[0].x, this.bounds[0].y, this.width, this.height);

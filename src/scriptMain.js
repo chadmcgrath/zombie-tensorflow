@@ -40,6 +40,7 @@ const minZombies = 3;
 const zombieGreen = "#2f402f";
 const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
 const zombieSpeed = 1;
+const humanSpeed=3;
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
@@ -47,10 +48,10 @@ let epsilonGreedy = 0;
 const learningRate = .001;
 
 const baseReward = 1;// bites and hit shots
-const missedShotReward = -baseReward / 8;
-const bumpWallReward = -baseReward / 2;
-const bumpScreenReward = -baseReward / 2;
-const bumpHumanReward = -baseReward / 4;
+const missedShotReward = -baseReward *.125;//.125;
+const bumpWallReward = -baseReward * .65;
+const bumpScreenReward = -baseReward * .65;
+const bumpHumanReward = -baseReward * .5;
 const eyeMaxRange = 1000;
 
 let gameSpeed = 4;
@@ -72,13 +73,23 @@ const configPpo = {
 }
 const zombieMoveFrames = [];
 const zombieAttackFrames = [];
+const survivorMoveFrames = [];
+const survivorShootFrames = [];
 for (let i = 0; i < 17; i++) {  // Replace 10 with the number of images you have
     zombieMoveFrames[i] = new Image();
-    zombieMoveFrames[i].src = `img/skeleton/skeleton-move-${i}.png`;  // Adjust the path and filename as needed
+    zombieMoveFrames[i].src = `img/skeleton/skeleton-move_${i}.png`;  // Adjust the path and filename as needed
 }
 for (let i = 0; i < 9; i++) {  // Replace 10 with the number of images you have
     zombieAttackFrames[i] = new Image();
-    zombieAttackFrames[i].src = `img/skeleton/skeleton-attack-${i}.png`;  // Adjust the path and filename as needed
+    zombieAttackFrames[i].src = `img/skeleton/skeleton-attack_${i}.png`;  // Adjust the path and filename as needed
+}
+for (let i = 0; i < 20; i++) {  // Replace 10 with the number of images you have
+    survivorMoveFrames[i] = new Image();
+    survivorMoveFrames[i].src = `img/survivor/survivor-move_rifle_${i}.png`;  // Adjust the path and filename as needed
+}
+for (let i = 0; i < 3; i++) {  // Replace 10 with the number of images you have
+    survivorShootFrames[i] = new Image();
+    survivorShootFrames[i].src = `img/survivor/survivor-shoot_rifle_${i}.png`;  // Adjust the path and filename as needed
 }
 //karpathy's eye
 var Eye = function (angle) {
@@ -91,6 +102,7 @@ var Eye = function (angle) {
 function Agent(config) {
     this.id = config.id;
     this.experiences = [];
+
     this.isLearning = false;
     const maxHp = 50;
     const eyeCount = numEyes;
@@ -114,10 +126,13 @@ function Agent(config) {
     this.pos = config.pos || new Vec(0, 0);
     this.minRad = config.rad || 8;
     this.rad = config.rad || 8;
-    this.speed = config.speed || (this.isHuman ? 4 : zombieSpeed);
+    this.speed = config.speed || (this.isHuman ? humanSpeed : zombieSpeed);
     this.dir = this.isHuman ? new Vec(1, 0) : randomAngle();
     this.newDir = this.dir.getUnit();
 
+    this.moveFactor = 1;
+    this.moveFrames = this.isZ ? zombieMoveFrames : survivorMoveFrames;
+    this.attackFrames = this.isZ ? zombieAttackFrames : survivorShootFrames;
     //todo: remove duplicate position
     Object.defineProperty(this, 'angle', {
         get: function () {
@@ -229,7 +244,7 @@ Agent.prototype.getColor = function () {
     if (this.isLearning) return 'blue';
     if (this.state === 'mouse') return '#FF00FF';
     if (this.state === 'attack') return 'red';
-    if (this.isHuman) return 'yellow';
+    if (this.isHuman) return 'purple';
     if (this.isZ) return 'green';
     return '#AAAAAA';
 };
@@ -308,7 +323,7 @@ Agent.prototype.zombify = async function (victim, zombie) {
 }
 
 Agent.prototype.logic = async function (clock, action, states, agentExperienceResult) {
-    let moveFactor = this.isShot ? .1 : 1;
+    this.moveFactor = this.isShot ? .1 : 1;
     var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
 
@@ -321,8 +336,6 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
     // bite and maybe convert humans to zombie
     if (this.isHuman === false) {
-        //ctx.drawImage(frames[frameIndex], 0, 0);
-        //frameIndex = (frameIndex + 1) % frames.length;
         let inMelee = false;
         this.state = 'idle';
 
@@ -337,10 +350,10 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
         for (let i = 0, l = seen.length; i < l; i++) {
             if (seen[i].dist <= this.rad * 2) {
-                moveFactor = 0;
+                this.moveFactor = 0;
                 if (seen[i].agent.isHuman) {
                     const human = seen[i].agent;
-                    moveFactor = 0;
+                    this.moveFactor = 0;
                     inMelee = true;
                     --human.currentHp;
                     human.isBit = true;
@@ -360,7 +373,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
         this.rad = Math.max(this.minRad, this.minRad + this.currentHp - this.maxHp);
         // try wandering if its stuck
-        if (!inMelee && moveFactor === 0) {
+        if (!inMelee && this.moveFactor === 0) {
             if (this.nextTimer <= 0) {
                 this.state = 'idle';
                 this.nextTimer = 3 + Math.random() * 10;
@@ -370,7 +383,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
             }
         }
         // follow other zombie
-        else if (this.state === 'idle' && Math.random() > 0.9 && seen[0] && moveFactor > 0) {
+        else if (this.state === 'idle' && Math.random() > 0.9 && seen[0] && this.moveFactor > 0) {
             if (this.nextTimer <= 0) {
                 this.nextTimer = 5;
                 this.newDir = seen[0].angle;
@@ -386,6 +399,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
         }
         if (this.isShot)
             this.moveFactor = .1;
+
     }
 
     else {
@@ -408,14 +422,14 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
             newAngle = Math.PI;
         }
         else {
-            moveFactor = 0;
+            this.moveFactor = 0;
             this.shoot(this);
         }
         // stop if collided with another human
         if (this.eyes[0].sensed_type === 1 && this.eyes[0].sensed_proximity < this.rad * 2) {
             this.rewardSignal = this.rewardSignal + bumpHumanReward;
             negRewards = negRewards + bumpHumanReward;
-            moveFactor = 0;
+            this.moveFactor = 0;
         }
 
         const unitOldDir = new Vec(this.dir.x, this.dir.y).getUnit();
@@ -423,14 +437,13 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
         this.dir = newVec;
     }
 
-
     if (this.ring) {
         this.ring += clock.delta * 20;
         if (this.ring > 100) this.ring = 0;
     }
     this.nextTimer -= clock.delta;
 
-    var speed = moveFactor * (this.speed) * 10;
+    var speed = this.moveFactor * (this.speed) * 10;
     this.isShot = false;
     this.isBit = false;
     // get velociy
@@ -558,13 +571,6 @@ Agent.prototype.shoot = (agent) => {
 }
 Agent.prototype.draw = function (ctx) {
 
-    ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, this.rad, 0, pi2, false);
-    ctx.fillStyle = this.getColor();
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.stroke();
     if (this.ring) {
         ctx.beginPath();
         ctx.arc(this.pos.x, this.pos.y, this.ring, 0, pi2, false);
@@ -572,14 +578,47 @@ Agent.prototype.draw = function (ctx) {
         ctx.strokeStyle = '#FF0000';
         ctx.stroke();
     }
+    
     var dir = new Vec(this.dir.x, this.dir.y);
-    ctx.beginPath();
-    ctx.moveTo(this.pos.x, this.pos.y);
-    ctx.lineTo(this.pos.x + dir.x * this.rad, this.pos.y + dir.y * this.rad);
-    ctx.strokeStyle = '#00FFFF';
-    ctx.stroke();
+    const images = this.moveFactor > 0 ? this.moveFrames : this.attackFrames;
+    const imageChangeRate = this.moveFactor > 0 ? 1 / 4 : 1;
 
+    if (images.length > 0) {
+        const index = Math.floor(((totalTurns + this.id) * imageChangeRate * this.moveFactor)) % images.length;
+        const image = images[index];
+        const width = this.rad * 4;
+        const height = this.rad * 4;
+        let centerX = this.pos.x - width / 2;
+        let centerY = this.pos.y - height / 2;
+        let angle = Math.atan2(dir.y, dir.x);
+        drawRotatedImage(ctx, image, centerX, centerY, width, height, angle);
+
+    }
+    else {
+        
+        // ctx.lineWidth = 2;
+        // ctx.strokeStyle = '#FFFFFF';
+        // ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(this.pos.x, this.pos.y);
+        ctx.lineTo(this.pos.x + dir.x * this.rad, this.pos.y + dir.y * this.rad);
+        ctx.strokeStyle = '#00FFFF';
+        ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(this.pos.x, this.pos.y, this.rad*2, 0, pi2, false);
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle =this.getColor();
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
 };
+function drawRotatedImage(ctx, image, x, y, width, height, angle) {
+    ctx.save();
+    ctx.translate(x + width / 2, y + height / 2);
+    ctx.rotate(angle);
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+    ctx.restore();
+}
 
 async function mainLoop(time, action, agentExperienceResult) {
     if (!time) {
@@ -648,7 +687,7 @@ async function mainLoop(time, action, agentExperienceResult) {
                     value,
                     logprobability]);
 
-                if (ppo.buffer.pointer === 0 && totalTurns >0) {
+                if (ppo.buffer.pointer === 0 && totalTurns > 0) {
                     for (const [states,
                         action,
                         reward,
@@ -661,7 +700,7 @@ async function mainLoop(time, action, agentExperienceResult) {
                             value,
                             logprobability);
                     };
-                    humans[i].experiences=[];
+                    humans[i].experiences = [];
 
                 }
             }
@@ -998,19 +1037,24 @@ function updateRadius(event) {
 
     // eslint-disable-next-line no-unused-vars
     const windowArea = $(window).width() * $(window).height();
+    
     const blockNum = windowArea / 50000;
-    for (let i = 0, l = blockNum; i < l; i++) {
-        blocks.push(new Square({}, ctx));
+    const squares = createGrid(ctx, 20, 100,50, 100, 80);
+    for(const s of squares){
+        blocks.push(s);
     }
-    const zombieHouseConfig = {
-        fill: zombieGreen,
-        stroke: 'olive',
+    // for (let i = 0, l = blockNum; i < l; i++) {
+    //     blocks.push(new Square({}, ctx));
+    // }
+    // const zombieHouseConfig = {
+    //     fill: zombieGreen,
+    //     stroke: 'olive',
 
-        pos: zombieHousePos,
-        width: ctx.canvas.height / 10,
-        height: ctx.canvas.height / 10,
-    }
-    blocks.push(new Square(zombieHouseConfig, ctx));
+    //     pos: zombieHousePos,
+    //     width: ctx.canvas.height / 10,
+    //     height: ctx.canvas.height / 10,
+    // }
+    // blocks.push(new Square(zombieHouseConfig, ctx));
     // not sure how the height works for drawing the square but I'll wing it
     const riverConfig1 = {
         fill: "blue",
@@ -1064,4 +1108,6 @@ function updateRadius(event) {
         }
     })
 })();
+
+//assets - zombies and survivors : https://opengameart.org/content/animated-top-down-zombie
 
