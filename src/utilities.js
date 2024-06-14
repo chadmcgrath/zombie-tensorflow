@@ -257,7 +257,7 @@ function lineIntersectsSquare(lineStart, lineEnd, square) {
 const stuff_collide = (agent, p2, blocks, check_walls, check_items) => {
     var minres = false;
     p2 = new Vec(p2.x, p2.y);
-    const p1 = agent.p;
+    const p1 = agent.pos;
     // collide with walls
     if (check_walls) {
 
@@ -296,7 +296,7 @@ const stuff_collide = (agent, p2, blocks, check_walls, check_items) => {
         // eslint-disable-next-line no-redeclare
         for (var i = 0, n = agent.items.length; i < n; i++) {
             var it = agent.items[i];
-            var res = line_point_intersect(p1, p2, it.p, it.rad);
+            var res = line_point_intersect(p1, p2, it.pos, it.rad);
             if (res) {
                 res.vx = it.v.x; // velocty information
                 res.vy = it.v.y;

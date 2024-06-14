@@ -2,7 +2,7 @@
 /* global $ */
 /* global Chart */
 /* global PPO */
-/* global pi2, randomAngle, fixAngle, Square, Vec, stuff_collide */
+/* global pi2, randomAngle, fixAngle, Vec, stuff_collide */
 
 /* global tf */
 //tf.enableDebugMode();//
@@ -33,37 +33,66 @@ let totalTurns = 0;
 let missedShots = 0;
 let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
-const buildingHumans = 10;
 const minHumans = 2;
 const minZombies = 3;
 const maxZombieSpawns = 15;
 
 const zombieGreen = "#2f402f";
 const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
-let zombieSpeed = 1;
+let zombieSpeed = .75;
 const humanSpeed = 3;
-let maxZombieSpeed = humanSpeed;
+let maxZombieSpeed = humanSpeed * 2 / 3;
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
 let epsilonGreedy = 0;
 const learningRate = .001;
 
-const baseReward = 1; //hit shots
-const hitShotReward = baseReward;
-const biteReward = baseReward * -1;
-const hitHumanReward = baseReward * -1;
-const missedShotReward = 0;//baseReward * -.125;
-const bumpWallReward = baseReward * -.55;
-const bumpScreenReward = baseReward * -.75;
-const bumpHumanReward = baseReward * -.65;
+// this seems to fascilitate a little bit of exploring, rathert han just facing a wall waiting to die.
+const rewardConfig2 = {
+    baseReward: 1,
+    hitShotReward: 1,
+    biteReward: -1,
+    hitHumanReward: -1,
+    missedShotReward: -.125,
+    bumpWallReward: -.55,
+    bumpScreenReward: -.75,
+    bumpHumanReward: -.65,
+    blockedVisionHuman: -.5,
+    blockedVisionWall: -.2,
+    farVisionReward: .2,
+    zombieProximityReward: -.25
 
-// these rewards don't seem to do much even at higher numbers. i think they're too confusing
-// prolly not a bad idea to walk over to your buddy sometimes
-const blockedVisionHuman = 0;//baseReward * -.5;
-const blockedVisionWall = -.125;//baseReward * -.125; // applied based on proximity to the wall
-// these spawn unpredictably so the game would have to be tweaked for this to be of much help
-const zombieProximityReward = -.2;//baseReward * -.25;
+}
+for (let key in rewardConfig2) {
+    if (key !== 'baseReward') {
+        rewardConfig2[key] *= rewardConfig2.baseReward;
+    }
+}
+
+const {
+    hitShotReward,
+    biteReward,
+    hitHumanReward,
+    missedShotReward,
+    bumpWallReward,
+    bumpScreenReward,
+    bumpHumanReward,
+    blockedVisionHuman,
+    blockedVisionWall,
+    zombieProximityReward
+} = rewardConfig2;
+
+// // these rewards don't seem to do much even at higher numbers. i think they're too confusing
+// // prolly not a bad idea to walk over to your buddy sometimes
+// const blockedVisionHuman = 0;//baseReward * -.5;
+
+// // the 2 can be combined into one function
+// const blockedVisionWall = baseReward * -.2; // applied based on proximity to the wall ahead of it
+// const farVisionReward= baseReward * .2; // applied based on proximity to the wall ahead of it
+
+// // these spawn unpredictably so the game would have to be tweaked for this to be of much help
+// const zombieProximityReward = -.2;//baseReward * -.25;
 
 
 let isSprites = true;
@@ -120,7 +149,7 @@ var Eye = function (angle) {
 function Agent(config) {
     this.id = config.id;
     this.experiences = [];
-    this.states=[];
+    this.states = [];
     this.isLearning = false;
     const maxHp = 50;
     const eyeCount = numEyes;
@@ -151,19 +180,7 @@ function Agent(config) {
     this.moveFactor = 1;
     this.moveFrames = this.isZ ? zombieMoveFrames : survivorMoveFrames;
     this.attackFrames = this.isZ ? zombieAttackFrames : survivorShootFrames;
-    //todo: remove duplicate position
-    Object.defineProperty(this, 'angle', {
-        get: function () {
-            return new Vec(this.dir.x, this.dir.y);
-        }
-    });
-    Object.defineProperty(this, 'p', {
-        get: function () {
-            return new Vec(this.pos.x, this.pos.y);
-        }
-    });
     this.v = new Vec(0, 0);
-    //
     this.state = config.state || 'idle';
     this.viewDist = config.viewDist || 1000;
     this.viewFov = (config.viewFov || Math.PI / 2);
@@ -177,17 +194,15 @@ Agent.prototype.getVision = function () {
     let eyeStates = [];
     var a = this;
     a.target = null;
-    const pos = a.p;
-    const angle = a.angle;
     let closestZombieRange = eyeMaxRange;
     for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
         var e = a.eyes[ei];
         e.sensed_proximity = e.max_range;
         e.sensed_type = 0;
-        const currentEyeAnglePointing = angle.rotate(e.angle).getUnit();
+        const currentEyeAnglePointing = a.dir.rotate(e.angle).getUnit();
         // we have a line from p to p->eyep
-        var eyep = new Vec(pos.x + e.max_range * currentEyeAnglePointing.x,
-            pos.y + e.max_range * currentEyeAnglePointing.y);
+        var eyep = new Vec(a.pos.x + e.max_range * currentEyeAnglePointing.x,
+            a.pos.y + e.max_range * currentEyeAnglePointing.y);
 
         if (isNaN(eyep.x)) {
             console.error('eyep.x is NaN');
@@ -198,7 +213,7 @@ Agent.prototype.getVision = function () {
             // eye collided with anything
             if (ei === 0)
                 a.target = res.agent;
-            e.sensed_proximity = res.up.distFrom(a.p);
+            e.sensed_proximity = res.up.distFrom(a.pos);
             e.sensed_type = res.type;
         }
 
@@ -216,9 +231,9 @@ Agent.prototype.getVision = function () {
 
         const sr = e.sensed_proximity;
         ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
-        const lineToX = pos.x + sr * currentEyeAnglePointing.x;
-        const lineToY = pos.y + sr * currentEyeAnglePointing.y;
+        ctx.moveTo(a.pos.x, a.pos.y);
+        const lineToX = a.pos.x + sr * currentEyeAnglePointing.x;
+        const lineToY = a.pos.y + sr * currentEyeAnglePointing.y;
         ctx.lineTo(lineToX, lineToY);
         ctx.stroke();
 
@@ -226,20 +241,15 @@ Agent.prototype.getVision = function () {
         // clip whether it cares about walls that are far away
         if (type === -.1 && sr < 100)
             type = 0;
-        if (type === 'zombie')
-            type = -1;
-        if (type === 'human')
-            type = 1;
 
         if (ei === 0) {
             if (e.sensed_type === 1)
                 this.rewardSignal = this.rewardSignal + blockedVisionHuman;
             if (e.sensed_type === -.1)
-                this.rewardSignal = this.rewardSignal + (blockedVisionWall * (1 - e.sensed_proximity / e.max_range));
+                this.rewardSignal = this.rewardSignal + (blockedVisionWall * (1 - e.sensed_proximity / (e.max_range / 2)));
         }
-        if (e.sensed_type === -1 && e.sensed_proximity < closestZombieRange) {
+        else if (e.sensed_type === -1 && e.sensed_proximity < closestZombieRange) {
             closestZombieRange = e.sensed_proximity;
-
         }
         // add to state for ML
         // tensorflow inputs
@@ -258,7 +268,7 @@ Agent.prototype.getColor = function () {
     if (this.state === 'mouse') return '#FF00FF';
     if (this.state === 'attack') return 'red';
     if (this.isHuman) return 'purple';
-    if (this.isZ) return 'green';
+    if (this.isZ) return zombieGreen;
     return '#AAAAAA';
 };
 
@@ -348,7 +358,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     // $('#slider-epsilon').val(0.2); 
 
 
-    if (this.isHuman === false) {
+    if (this.isZ) {
         let inMelee = false;
         this.state = 'idle';
 
@@ -356,9 +366,13 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
         const seeHuman = seen.find(s => s.agent.isHuman);
         if (seeHuman) {
             this.state = 'attack';
-            this.nextTimer = 5;
-            this.newDir = seeHuman.angle;
-            this.dir = seeHuman.angle;
+            // the timer keeps it in the same direction for a bit
+            // they should be less maneuverable than humans  
+            if (this.nextTimer <= 0) {
+                this.nextTimer = 1;
+                this.newDir = seeHuman.angle;
+                this.dir = seeHuman.angle;
+            }
         }
 
         for (let i = 0, l = seen.length; i < l; i++) {
@@ -373,7 +387,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
                     human.isBit = true;
 
                     if (isVampire || this.isVampire)
-                        ++this.currentHp / 10;
+                        ++this.currentHp / 20;
 
                     //tf ml reward
                     human.rewardSignal = human.rewardSignal + biteReward;
@@ -386,11 +400,13 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
         }
 
         this.rad = Math.max(this.minRad, this.minRad + this.currentHp - this.maxHp);
-        // try wandering if its stuck
+        // try wandering if its stuck(usually against a wall)
         if (!inMelee && this.moveFactor === 0) {
-            if (this.nextTimer <= 0) {
+            // change directions from time to time if idle, but if the attacking zombie is stuck (on another zombie), 
+            //it will also change directions
+            if (this.nextTimer <= 0 || this.state === 'attack') {
                 this.state = 'idle';
-                this.nextTimer = 3 + Math.random() * 10;
+                this.nextTimer = 3 + Math.random() * 2;
                 this.newDir = randomAngle();
                 this.dir = this.newDir;
                 this.moveFactor = .2;
@@ -413,9 +429,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
         }
         if (this.isShot)
             this.moveFactor = .1;
-
     }
-
     else {
 
         let actionSelected;
@@ -468,14 +482,13 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     this.pos.y += vy;
     // prevent walking through blocks
     for (let i = 0, l = blocks.length; i < l; i++) {
-        if (this.intersect = blocks[i].rayIntersect(this.pos, this.dir)) {
+        this.intersect = blocks[i].rayIntersect(this.pos, this.dir)
+        if (this.intersect) {
             if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
                 this.pos = this.intersect[0].pos;
                 this.rewardSignal = this.rewardSignal + bumpWallReward
-                if(this.isHuman)
+                if (this.isHuman)
                     negRewards = negRewards + bumpWallReward;
-                //this.newDir = this.intersect[0].n;
-                //this.dir = randomAngle();
                 break;
             }
             else {
@@ -494,6 +507,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
             reward: this.rewardSignal,
             done: false
         }
+        // for the ppo model
         if (agentExperienceResult) {
             agentExperienceResult.newObservation = this.states;
             agentExperienceResult.reward = this.rewardSignal;
@@ -596,30 +610,30 @@ Agent.prototype.draw = function (ctx) {
     let viewedRad = this.rad;
     let image = null;
     var dir = new Vec(this.dir.x, this.dir.y).getUnit();
-    if (isSprites) {    
+    if (isSprites) {
         const images = this.moveFactor > 0 ? this.moveFrames : this.attackFrames;
-        const imageChangeRate = this.moveFactor > 0 ? 1 / 4 : 1;
         if (images.length > 0) {
+            const imageChangeRate = this.moveFactor > 0 ? 1 / 4 : 1;
             const index = Math.floor(((totalTurns + this.id) * imageChangeRate * this.moveFactor)) % images.length;
             image = images[index];
             viewedRad = this.rad * 1.5;
             ctx.globalAlpha = 0.3;
         }
-    }  
+    }
     ctx.beginPath();
     ctx.arc(this.pos.x, this.pos.y, viewedRad, 0, pi2, false);
-    
+
     ctx.fillStyle = this.getColor();
     ctx.fill();
     ctx.globalAlpha = 1.0;
-    if(image){
+    if (image) {
         const width = this.rad * 4;
         const height = this.rad * 4;
         let centerX = this.pos.x - width / 2;
         let centerY = this.pos.y - height / 2;
-        let angle = Math.atan2(dir.y, dir.x);             
+        let angle = Math.atan2(dir.y, dir.x);
         drawRotatedImage(ctx, image, centerX, centerY, width, height, angle);
-        
+
     }
     else {
         // ctx.lineWidth = 2;
@@ -782,7 +796,7 @@ class Env {
 
                 $("#weights").text(weightsData);
                 $("#criticWeights").text(criticWeightsData);
-                $("#current-state").text(agents.find(a=> a.isHuman).states.join(', '));
+                $("#current-state").text(agents.find(a => a.isHuman).states.join(', '));
 
                 createOrUpdateRewardChart(rewardOverTime, batchSize)
                 //await createOrUpdateLossesChart();
