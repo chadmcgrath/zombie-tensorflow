@@ -27,7 +27,7 @@
         <div id='missed-shots'>0</div>
         hit shots:1
         <div id='hit-shots-baddy'>0</div>
-        hs hots human!:-1
+        hit shots human!!!:-1
         <div id='hit-shots-human'>0</div>
 
         <div id='turns'></div>
@@ -35,7 +35,7 @@
     </div>
 
     <div id="button-container" class="button-container">
-      <div>
+      <!-- <div>
         <label for="zombieSpeed">Zombie Speed:</label>
         <input type="range" id="zombieSpeed" min="0" max="10" step="0.1" value="2">
         <br>
@@ -44,13 +44,18 @@
         <br>
         <label for="radius">Radius:</label>
         <input type="range" id="radius" min="0" max="100" step="1" value="8">
-      </div>
-      <div>
+      </div> -->
+      <!-- <div>
         <label for="actorInput">Actor Model:</label>
         <input type="file" id="actorInput" accept=".json">
         <label for="criticInput">Critic Model:</label>
         <input type="file" id="criticInput" accept=".json">
         <button onclick="loadModelFiles()">Load Models</button>
+      </div> -->
+      <div>
+        <label for="show-eyes">Show Eyes</label>
+        <input type="range" id="show-eyes" min="0" max="2" step="1" value="0">   
+        <button id="toggle-sprites" class="btn btn-primary">Toggle Sprites</button>  
       </div>
       <div>
         <button id="add-vampire-button" class="btn btn-primary">Add Vampire</button>

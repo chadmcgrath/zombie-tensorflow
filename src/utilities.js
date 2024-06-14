@@ -22,8 +22,8 @@ function createGrid(ctx, minX, maxX, minY, maxY, z) {
     const canvasHeight = ctx.canvas.height;
     const squares = [];
 
-    for (let i = 0; i < canvasWidth; i += maxX + z) {
-        for (let j = 0; j < canvasHeight; j += maxY + z) {
+    for (let i = 20; i < canvasWidth; i += maxX + z) {
+        for (let j = 20; j < canvasHeight; j += maxY + z) {
             const width = Math.random() * (maxX - minX) + minX;
             const height = Math.random() * (maxY - minY) + minY;
             const square = new Square({

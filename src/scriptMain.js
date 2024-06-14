@@ -37,10 +37,11 @@ let hitShotsHuman = 0;
 const buildingHumans = 10;
 const minHumans = 2;
 const minZombies = 3;
+const maxZombieSpawns = 50;
 const zombieGreen = "#2f402f";
 const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
 const zombieSpeed = 1;
-const humanSpeed=3;
+const humanSpeed = 3;
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
@@ -48,10 +49,22 @@ let epsilonGreedy = 0;
 const learningRate = .001;
 
 const baseReward = 1;// bites and hit shots
-const missedShotReward = -baseReward *.125;//.125;
-const bumpWallReward = -baseReward * .65;
-const bumpScreenReward = -baseReward * .65;
-const bumpHumanReward = -baseReward * .5;
+const biteReward = baseReward * -1;
+const hitHumanReward = baseReward * -1;
+const missedShotReward = baseReward * -.125;//.125;
+const bumpWallReward = baseReward * -.55;
+const bumpScreenReward = baseReward * -.75;
+const bumpHumanReward = baseReward * -.5;
+
+// these rewards don't seem to do much even at higher numbers. i think they're too confusing
+const blockedVisionHuman = baseReward * -.5;
+const blockedVisionWall = baseReward * -.25;
+// these spawn unpredictably so the game would have to be tweaked for this to be of much help
+const zombieProximityReward = 0;//baseReward * -.25;
+
+
+let isSprites = true;
+let showEyes = 0;
 const eyeMaxRange = 1000;
 
 let gameSpeed = 4;
@@ -91,6 +104,8 @@ for (let i = 0; i < 3; i++) {  // Replace 10 with the number of images you have
     survivorShootFrames[i] = new Image();
     survivorShootFrames[i].src = `img/survivor/survivor-shoot_rifle_${i}.png`;  // Adjust the path and filename as needed
 }
+
+
 //karpathy's eye
 var Eye = function (angle) {
     this.angle = angle; // angle relative to agent its on
@@ -161,10 +176,12 @@ Agent.prototype.getVision = function () {
     a.target = null;
     const pos = a.p;
     const angle = a.angle;
+    let closestZombieRange = eyeMaxRange;
     for (var ei = 0, ne = a.eyes.length; ei < ne; ei++) {
         var e = a.eyes[ei];
-        const eangle = e.angle;
-        const currentEyeAnglePointing = angle.rotate(eangle).getUnit();
+        e.sensed_proximity = e.max_range;
+        e.sensed_type = 0;
+        const currentEyeAnglePointing = angle.rotate(e.angle).getUnit();
         // we have a line from p to p->eyep
         var eyep = new Vec(pos.x + e.max_range * currentEyeAnglePointing.x,
             pos.y + e.max_range * currentEyeAnglePointing.y);
@@ -178,39 +195,21 @@ Agent.prototype.getVision = function () {
             // eye collided with anything
             if (ei === 0)
                 a.target = res.agent;
-
             e.sensed_proximity = res.up.distFrom(a.p);
             e.sensed_type = res.type;
-            if ('vx' in res) {
-                e.vx = res.vx;
-                e.vy = res.vy;
-            } else {
-                e.vx = 0;
-                e.vy = 0;
-            }
-        } else {
-            e.sensed_proximity = e.max_range;
-            e.sensed_type = 0;
-            e.vx = 0;
-            e.vy = 0;
         }
+
         ctx.strokeStyle = "rgb(0,0,0,0)";
-
-
-
-        // ctx.strokeStyle = "rgb(255,150,150)";
-        // if (e.sensed_type === -.1) {
-        //     ctx.strokeStyle = "yellow"; // wall
-        // }
-        // if (e.sensed_type === 0) {
-        //     ctx.strokeStyle = "rgb(200,200,200)"; //nothing
-        // }
-        //if (e.sensed_type === 1) { ctx.strokeStyle = "yellow"; } // human
-        //if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
-        //if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
-        // if (ei === 0) {
-        //     ctx.strokeStyle = "blue";
-        // }
+        if (showEyes > 1) {
+            ctx.strokeStyle = "rgb(255,150,150)";
+            if (e.sensed_type === -.1) { ctx.strokeStyle = "yellow"; }// wall
+            else if (e.sensed_type === 0) { ctx.strokeStyle = "rgb(200,200,200)"; } //nothing
+        }
+        if (showEyes > 0) {
+            if (e.sensed_type === 1) { ctx.strokeStyle = "yellow"; } // human
+            else if (e.sensed_type === -1) { ctx.strokeStyle = "rgb(150,255,150)"; } // z
+            if (e.sensed_type === -1) { ctx.strokeStyle = "green"; } // z
+        }
 
         const sr = e.sensed_proximity;
         ctx.beginPath();
@@ -229,13 +228,24 @@ Agent.prototype.getVision = function () {
         if (type === 'human')
             type = 1;
 
+        if (ei === 0) {
+            if (e.sensed_type === 1)
+                this.rewardSignal = this.rewardSignal + blockedVisionHuman;
+            if (e.sensed_type === -.1)
+                this.rewardSignal = this.rewardSignal + (blockedVisionWall * (1 - e.sensed_proximity / e.max_range));
+        }
+        if (e.sensed_type === -1 && e.sensed_proximity < closestZombieRange) {
+            closestZombieRange = e.sensed_proximity;
+
+        }
         // add to state for ML
         // tensorflow inputs
         // we may only need distance here, and let the nn figure out the rest
         // based on which eye sense the object
         eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
     }
-    //}
+    this.rewardSignal = this.rewardSignal + zombieProximityReward * (1 - e.sensed_proximity / e.max_range);
+
     // tensorflow inputs
     return eyeStates;
 }
@@ -334,7 +344,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
     // $('#slider-lr').val(0.01); 
     // $('#slider-epsilon').val(0.2); 
 
-    // bite and maybe convert humans to zombie
+
     if (this.isHuman === false) {
         let inMelee = false;
         this.state = 'idle';
@@ -350,6 +360,7 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
 
         for (let i = 0, l = seen.length; i < l; i++) {
             if (seen[i].dist <= this.rad * 2) {
+                // bite and maybe convert human to zombie
                 this.moveFactor = 0;
                 if (seen[i].agent.isHuman) {
                     const human = seen[i].agent;
@@ -362,8 +373,8 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
                         ++this.currentHp / 10;
 
                     //tf ml reward
-                    human.rewardSignal = human.rewardSignal - baseReward;
-                    negRewards = negRewards - baseReward;
+                    human.rewardSignal = human.rewardSignal + biteReward;
+                    negRewards = negRewards + biteReward;
                     if (human.currentHp < 1)
                         await this.zombify(human, this);
 
@@ -533,8 +544,8 @@ Agent.prototype.shoot = (agent) => {
     if (closestTarget) {
         if (closestTarget.isHuman) {
             ctx.strokeStyle = 'orange';
-            agent.rewardSignal -= baseReward;
-            negRewards -= baseReward;
+            agent.rewardSignal += hitHumanReward;
+            negRewards += hitHumanReward;
             hitShotsHuman += 1;
 
         }
@@ -578,24 +589,35 @@ Agent.prototype.draw = function (ctx) {
         ctx.strokeStyle = '#FF0000';
         ctx.stroke();
     }
+    let viewedRad = this.rad;
+    let image = null;
+    var dir = new Vec(this.dir.x, this.dir.y).getUnit();
+    if (isSprites) {    
+        const images = this.moveFactor > 0 ? this.moveFrames : this.attackFrames;
+        const imageChangeRate = this.moveFactor > 0 ? 1 / 4 : 1;
+        if (images.length > 0) {
+            const index = Math.floor(((totalTurns + this.id) * imageChangeRate * this.moveFactor)) % images.length;
+            image = images[index];
+            viewedRad = this.rad * 1.5;
+            ctx.globalAlpha = 0.3;
+        }
+    }  
+    ctx.beginPath();
+    ctx.arc(this.pos.x, this.pos.y, viewedRad, 0, pi2, false);
     
-    var dir = new Vec(this.dir.x, this.dir.y);
-    const images = this.moveFactor > 0 ? this.moveFrames : this.attackFrames;
-    const imageChangeRate = this.moveFactor > 0 ? 1 / 4 : 1;
-
-    if (images.length > 0) {
-        const index = Math.floor(((totalTurns + this.id) * imageChangeRate * this.moveFactor)) % images.length;
-        const image = images[index];
+    ctx.fillStyle = this.getColor();
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+    if(image){
         const width = this.rad * 4;
         const height = this.rad * 4;
         let centerX = this.pos.x - width / 2;
         let centerY = this.pos.y - height / 2;
-        let angle = Math.atan2(dir.y, dir.x);
+        let angle = Math.atan2(dir.y, dir.x);             
         drawRotatedImage(ctx, image, centerX, centerY, width, height, angle);
-
+        
     }
     else {
-        
         // ctx.lineWidth = 2;
         // ctx.strokeStyle = '#FFFFFF';
         // ctx.stroke();
@@ -605,12 +627,6 @@ Agent.prototype.draw = function (ctx) {
         ctx.strokeStyle = '#00FFFF';
         ctx.stroke();
     }
-    ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, this.rad*2, 0, pi2, false);
-    ctx.globalAlpha = 0.1;
-    ctx.fillStyle =this.getColor();
-    ctx.fill();
-    ctx.globalAlpha = 1.0;
 };
 function drawRotatedImage(ctx, image, x, y, width, height, angle) {
     ctx.save();
@@ -640,7 +656,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
     if (totalTurns > 10000 && totalTurns % 1000 === 0) {
-        const numZombs = Math.min((totalTurns - 10000) / 2000, 100);
+        const numZombs = Math.min((totalTurns - 10000) / 2000, maxZombieSpawns);
         for (let i = 0; i < numZombs; i++) {
             addUnit({ type: 'zombie', pos: zombieHousePos, speed: Math.min(zombieSpeed + totalTurns / 40000, 3) });
         }
@@ -780,10 +796,7 @@ class Env {
                 arc: function () { },
                 fill: function () { },
                 stroke: function () { },
-                // Add any other methods you use
             };
-            // this isn't detecing the spacebar right away while the thread is blocked by the loop
-            // i think it's worse when running tensorflow off of gpu
             if (loopCount >= batchSize * 10) {
                 loopCount = 0;
                 continueLoop = false;
@@ -968,6 +981,9 @@ $('#add-zombie-button').click(async function () {
 $('#add-human-button').click(async function () {
     await addUnit({ type: 'human' });
 });
+$('#toggle-sprites').click(async function () {
+    isSprites = !isSprites;
+});
 const loadModels = async () => {
     const name = 'zed-tf'
     ppo.actor = await tf.loadLayersModel('indexeddb://actor-' + name);
@@ -1002,7 +1018,7 @@ const loadModelFiles = async () => {
     ppo.actor = await tf.loadLayersModel(actorUrl);
     ppo.critic = await tf.loadLayersModel(criticUrl);
 }
-const zombieSpeedElement = $('#zombieSpeed');
+//const zombieSpeedElement = $('#zombieSpeed');
 //zombieSpeedElement.addEventListener('change', updateZombieSpeed);
 //let zombieSpeed
 //$('#maxZombieSpeed').addEventListener('change', updateMaxZombieSpeed);
@@ -1011,12 +1027,12 @@ const zombieSpeedElement = $('#zombieSpeed');
 // document.getElementById('criticInput').addEventListener('change', loadCriticModel);
 
 function updateZombieSpeed(event) {
-    const zombieSpeed = event.target.value;
+    zombieSpeed = event.target.value;
     // Update minZombieSpeed in your application
 }
 
 function updateMaxZombieSpeed(event) {
-    const maxZombieSpeed = event.target.value;
+    maxZombieSpeed = event.target.value;
     // Update maxZombieSpeed in your application
 }
 
@@ -1024,6 +1040,9 @@ function updateRadius(event) {
     radius = event.target.value;
     // Update radius in your application
 }
+$('#show-eyes').on('input', function () {
+    showEyes = +$(this).val();
+});
 (async function () {
 
     $('#gameSpeed').change(function () {
@@ -1037,10 +1056,10 @@ function updateRadius(event) {
 
     // eslint-disable-next-line no-unused-vars
     const windowArea = $(window).width() * $(window).height();
-    
+
     const blockNum = windowArea / 50000;
-    const squares = createGrid(ctx, 20, 100,50, 100, 80);
-    for(const s of squares){
+    const squares = createGrid(ctx, 20, 100, 50, 100, 70);
+    for (const s of squares) {
         blocks.push(s);
     }
     // for (let i = 0, l = blockNum; i < l; i++) {
