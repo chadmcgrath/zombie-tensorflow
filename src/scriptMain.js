@@ -26,7 +26,6 @@ const actorLossValues = [];
 const criticLossValues = [];
 let continueLoop = false;
 let loopCount = 0;
-let states = [];
 let negRewards = 0;
 let totalRewards = 0;
 let rewardOverTime = [];
@@ -37,30 +36,34 @@ let hitShotsHuman = 0;
 const buildingHumans = 10;
 const minHumans = 2;
 const minZombies = 3;
-const maxZombieSpawns = 50;
+const maxZombieSpawns = 15;
+
 const zombieGreen = "#2f402f";
 const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
-const zombieSpeed = 1;
+let zombieSpeed = 1;
 const humanSpeed = 3;
+let maxZombieSpeed = humanSpeed;
 // Hyperparameters
 const numActions = 11;
 let batchSize = +$('#slider-batch').val();
 let epsilonGreedy = 0;
 const learningRate = .001;
 
-const baseReward = 1;// bites and hit shots
+const baseReward = 1; //hit shots
+const hitShotReward = baseReward;
 const biteReward = baseReward * -1;
 const hitHumanReward = baseReward * -1;
-const missedShotReward = baseReward * -.125;//.125;
+const missedShotReward = 0;//baseReward * -.125;
 const bumpWallReward = baseReward * -.55;
 const bumpScreenReward = baseReward * -.75;
-const bumpHumanReward = baseReward * -.5;
+const bumpHumanReward = baseReward * -.65;
 
 // these rewards don't seem to do much even at higher numbers. i think they're too confusing
-const blockedVisionHuman = baseReward * -.5;
-const blockedVisionWall = baseReward * -.25;
+// prolly not a bad idea to walk over to your buddy sometimes
+const blockedVisionHuman = 0;//baseReward * -.5;
+const blockedVisionWall = -.125;//baseReward * -.125; // applied based on proximity to the wall
 // these spawn unpredictably so the game would have to be tweaked for this to be of much help
-const zombieProximityReward = 0;//baseReward * -.25;
+const zombieProximityReward = -.2;//baseReward * -.25;
 
 
 let isSprites = true;
@@ -81,7 +84,7 @@ const configPpo = {
         'pi': [numInputs, numInputs],           // Network architecture for the policy network
         'vf': [numInputs, numInputs]           // Network architecture for the value network
     },
-    activation: 'tanh',          //relu, elu Activation function to be used in both policy and value networks
+    activation: 'elu',          //relu, elu Activation function to be used in both policy and value networks
     verbose: 0                 // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
 }
 const zombieMoveFrames = [];
@@ -117,7 +120,7 @@ var Eye = function (angle) {
 function Agent(config) {
     this.id = config.id;
     this.experiences = [];
-
+    this.states=[];
     this.isLearning = false;
     const maxHp = 50;
     const eyeCount = numEyes;
@@ -332,7 +335,7 @@ Agent.prototype.zombify = async function (victim, zombie) {
     victim.state = 'idle';
 }
 
-Agent.prototype.logic = async function (clock, action, states, agentExperienceResult) {
+Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     this.moveFactor = this.isShot ? .1 : 1;
     var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
@@ -469,9 +472,10 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
             if (this.intersect[0].dist <= 0 && this.intersect[1].dist > 0) {
                 this.pos = this.intersect[0].pos;
                 this.rewardSignal = this.rewardSignal + bumpWallReward
-                negRewards = negRewards + bumpWallReward;
+                if(this.isHuman)
+                    negRewards = negRewards + bumpWallReward;
                 //this.newDir = this.intersect[0].n;
-                this.dir = randomAngle();
+                //this.dir = randomAngle();
                 break;
             }
             else {
@@ -483,15 +487,15 @@ Agent.prototype.logic = async function (clock, action, states, agentExperienceRe
     // if we hit a wall turn arround
     this.CheckScreenBounds();
 
-    if (this.isHuman === true && states.length > 0) {
-        states = await this.getStates();
+    if (this.isHuman === true) {
+        this.states = await this.getStates();
         const ret = {
-            newObservation: states,
+            newObservation: this.states,
             reward: this.rewardSignal,
             done: false
         }
         if (agentExperienceResult) {
-            agentExperienceResult.newObservation = states;
+            agentExperienceResult.newObservation = this.states;
             agentExperienceResult.reward = this.rewardSignal;
         }
 
@@ -551,7 +555,7 @@ Agent.prototype.shoot = (agent) => {
         }
         else {
             ctx.strokeStyle = 'red';
-            !agent.isBit && (agent.rewardSignal += baseReward);
+            !agent.isBit && (agent.rewardSignal += hitShotReward);
             hitShotsBaddy += 1;
         }
 
@@ -658,7 +662,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     if (totalTurns > 10000 && totalTurns % 1000 === 0) {
         const numZombs = Math.min((totalTurns - 10000) / 2000, maxZombieSpawns);
         for (let i = 0; i < numZombs; i++) {
-            addUnit({ type: 'zombie', pos: zombieHousePos, speed: Math.min(zombieSpeed + totalTurns / 40000, 3) });
+            addUnit({ type: 'zombie', pos: zombieHousePos, speed: Math.min(zombieSpeed + totalTurns / 40000, maxZombieSpeed) });
         }
     }
     let zombies = agents.filter(agent => agent.isZ);
@@ -685,16 +689,15 @@ async function mainLoop(time, action, agentExperienceResult) {
     for (let i = 0, l = humans.length; i < l; i++) {
         if (i === 0) {
             humans[i].isLearning = true;
-            const states = await humans[0].getStates();
-            await humans[i].logic(clock, action, states, agentExperienceResult);
+            await humans[i].logic(clock, action, agentExperienceResult);
         }
         else {
             // these are the other humans. they use the best action, rather than the proximal action
-            const states = await humans[i].getStates();
+            const states = (humans[i].states && humans[i].states.length > 0) ? humans[i].states : await humans[i].getStates();
             const [preds, actionProximal, value, logprobability] = await ppo.getSample(states);
             humans[i].isLearning = false;
             const action = tf.argMax(preds).dataSync()[0];
-            const rets = await humans[i].logic(clock, action, states);
+            const rets = await humans[i].logic(clock, action);
             if (i < 0) {
                 // hack to add argMax agent to add to buffer in seequence
                 humans[i].experiences.push([states,
@@ -779,7 +782,7 @@ class Env {
 
                 $("#weights").text(weightsData);
                 $("#criticWeights").text(criticWeightsData);
-                $("#current-state").text(states.join(', '));
+                $("#current-state").text(agents.find(a=> a.isHuman).states.join(', '));
 
                 createOrUpdateRewardChart(rewardOverTime, batchSize)
                 //await createOrUpdateLossesChart();
@@ -808,7 +811,7 @@ class Env {
     }
     reset() {
         this.i = 0;
-        const states = agents.find(a => a.isHuman).getStates();
+        const states = agents.find(a => a.isHuman).states;
         if (states.length > 0)
             return states;
         const array = new Array(this.observationSpace.shape[0]).fill(.1);
@@ -914,7 +917,7 @@ async function addUnit(config) {
         id: maxId,
         type: config.type || 'zombie',
         viewDist: 1000,
-        pos: config.pos || new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
+        pos: config?.pos ? new Vec(config.pos.x, config.pos.y) : new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
         speed: config.speed || null,
 
     });
@@ -1021,20 +1024,13 @@ const loadModelFiles = async () => {
 //const zombieSpeedElement = $('#zombieSpeed');
 //zombieSpeedElement.addEventListener('change', updateZombieSpeed);
 //let zombieSpeed
-//$('#maxZombieSpeed').addEventListener('change', updateMaxZombieSpeed);
+$('#maxZombieSpeed').change(function () {
+    zombieSpeed = $(this).val();
+})
 //$('#radius').addEventListener('change', updateRadius);
 // document.getElementById('actorInput').addEventListener('change', loadActorModel);
 // document.getElementById('criticInput').addEventListener('change', loadCriticModel);
 
-function updateZombieSpeed(event) {
-    zombieSpeed = event.target.value;
-    // Update minZombieSpeed in your application
-}
-
-function updateMaxZombieSpeed(event) {
-    maxZombieSpeed = event.target.value;
-    // Update maxZombieSpeed in your application
-}
 
 function updateRadius(event) {
     radius = event.target.value;
