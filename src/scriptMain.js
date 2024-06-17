@@ -2,7 +2,7 @@
 /* global $ */
 /* global Chart */
 /* global PPO */
-/* global pi2, randomAngle, fixAngle, Vec, stuff_collide */
+/* global pi2, randomAngle, fixAngle, Vec, stuff_collide, rewardConfigs */
 
 /* global tf */
 //tf.enableDebugMode();//
@@ -21,7 +21,7 @@ const clock = {
     delta: 0
 };
 const numEyes = 30;
-const numInputs = numEyes * 3;
+const numInputs = numEyes * 2;
 const actorLossValues = [];
 const criticLossValues = [];
 let continueLoop = false;
@@ -39,37 +39,22 @@ const maxZombieSpawns = 15;
 
 const zombieGreen = "#2f402f";
 const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
-let zombieSpeed = .75;
+let zombieSpeed = 1;
 const humanSpeed = 3;
 let maxZombieSpeed = humanSpeed * 2 / 3;
 // Hyperparameters
 const numActions = 11;
-let batchSize = +$('#slider-batch').val();
+let batchSize = 512;//+$('#slider-batch').val();
 let epsilonGreedy = 0;
 const learningRate = .001;
 
-// this seems to fascilitate a little bit of exploring, rathert han just facing a wall waiting to die.
-const rewardConfig2 = {
-    baseReward: 1,
-    hitShotReward: 1,
-    biteReward: -1,
-    hitHumanReward: -1,
-    missedShotReward: -.125,
-    bumpWallReward: -.55,
-    bumpScreenReward: -.75,
-    bumpHumanReward: -.65,
-    blockedVisionHuman: -.5,
-    blockedVisionWall: -.2,
-    farVisionReward: .2,
-    zombieProximityReward: -.25
 
-}
-for (let key in rewardConfig2) {
+let rewardConfig = rewardConfigs.explore;
+for (let key in rewardConfig) {
     if (key !== 'baseReward') {
-        rewardConfig2[key] *= rewardConfig2.baseReward;
+        rewardConfig[key] *= (rewardConfig.baseReward || 1);
     }
 }
-
 const {
     hitShotReward,
     biteReward,
@@ -81,19 +66,7 @@ const {
     blockedVisionHuman,
     blockedVisionWall,
     zombieProximityReward
-} = rewardConfig2;
-
-// // these rewards don't seem to do much even at higher numbers. i think they're too confusing
-// // prolly not a bad idea to walk over to your buddy sometimes
-// const blockedVisionHuman = 0;//baseReward * -.5;
-
-// // the 2 can be combined into one function
-// const blockedVisionWall = baseReward * -.2; // applied based on proximity to the wall ahead of it
-// const farVisionReward= baseReward * .2; // applied based on proximity to the wall ahead of it
-
-// // these spawn unpredictably so the game would have to be tweaked for this to be of much help
-// const zombieProximityReward = -.2;//baseReward * -.25;
-
+} = rewardConfig;
 
 let isSprites = true;
 let showEyes = 0;
@@ -239,8 +212,8 @@ Agent.prototype.getVision = function () {
 
         let type = e.sensed_type;
         // clip whether it cares about walls that are far away
-        if (type === -.1 && sr < 100)
-            type = 0;
+        // if (type === -.1 && sr > 100)
+        //     type = 0;
 
         if (ei === 0) {
             if (e.sensed_type === 1)
@@ -255,7 +228,8 @@ Agent.prototype.getVision = function () {
         // tensorflow inputs
         // we may only need distance here, and let the nn figure out the rest
         // based on which eye sense the object
-        eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
+        eyeStates.push(e.sensed_proximity/e.max_range, type);
+        //eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
     }
     this.rewardSignal = this.rewardSignal + zombieProximityReward * (1 - e.sensed_proximity / e.max_range);
 
@@ -347,11 +321,11 @@ Agent.prototype.zombify = async function (victim, zombie) {
 
 Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     this.moveFactor = this.isShot ? .1 : 1;
-    var batchValue = $('#slider-batch').val();
+    //var batchValue = $('#slider-batch').val();
     var epsilonValue = 0;//$('#slider-epsilon').val();
 
     epsilonGreedy = +epsilonValue;
-    batchSize = +batchValue;
+    //batchSize = +batchValue;
     // // Setters
     // $('#slider-batch').val(8); 
     // $('#slider-lr').val(0.01); 
@@ -432,16 +406,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     }
     else {
 
-        let actionSelected;
-        if (Math.random() < epsilonGreedy) {
-            // Take a random action
-            actionSelected = Math.floor(Math.random() * numActions);
-            const actionsOneHot = Array(numActions).fill(.1);
-            actionsOneHot[actionSelected] = .8;
-        } else {
-            actionSelected = action;
-        }
-
+        const actionSelected = action;
         let newAngle = 0;
         const numAngles = numActions - 2;
         if (actionSelected < numAngles) {
@@ -515,8 +480,8 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
 
         totalRewards += this.rewardSignal;
         rewardOverTime.push(this.rewardSignal);
-        $("#rewardTotal").text(totalRewards);
-        $("#neg-rewards").text(negRewards);
+        $("#rewardTotal").text(totalRewards.toFixed(5));
+        $("#neg-rewards").text(negRewards.toFixed(5));
         this.rewardSignal = 0;
         return ret;
     }
@@ -572,11 +537,8 @@ Agent.prototype.shoot = (agent) => {
             !agent.isBit && (agent.rewardSignal += hitShotReward);
             hitShotsBaddy += 1;
         }
-
-
         closestTarget.isShot = true;
         closestTarget.currentHp--;
-        closestTarget.state = 'idle';
         if (closestTarget.currentHp < 1) {
             closestTarget.ring = 5;
             console.log('killed target' + closestTarget.id + closestTarget.type);
@@ -712,7 +674,7 @@ async function mainLoop(time, action, agentExperienceResult) {
             humans[i].isLearning = false;
             const action = tf.argMax(preds).dataSync()[0];
             const rets = await humans[i].logic(clock, action);
-            if (i < 0) {
+            if (i < 1) {
                 // hack to add argMax agent to add to buffer in seequence
                 humans[i].experiences.push([states,
                     action,
@@ -1035,6 +997,31 @@ const loadModelFiles = async () => {
     ppo.actor = await tf.loadLayersModel(actorUrl);
     ppo.critic = await tf.loadLayersModel(criticUrl);
 }
+var rewardModal = $('#rewardModal');
+    var span = $('.close')[0];
+
+    $('#openRewardModal').click(function() {
+        rewardModal.show();
+    });
+
+    $('.close').click(function() {
+        rewardModal.hide();
+    });
+
+    $(window).click(function(event) {
+        if (event.target == rewardModal[0]) {
+            rewardModal.hide();
+        }
+    });
+
+$('#rewardForm').submit(function(event) {
+    event.preventDefault();
+    let rewardConfig = $(this).serializeArray().reduce(function(obj, item) {
+        obj[item.name] = item.value;
+        return obj;
+    }, {});
+    console.log(rewardConfig); // Logs the form data to the console
+});
 //const zombieSpeedElement = $('#zombieSpeed');
 //zombieSpeedElement.addEventListener('change', updateZombieSpeed);
 //let zombieSpeed
@@ -1055,6 +1042,10 @@ $('#show-eyes').on('input', function () {
 });
 (async function () {
 
+    // Fill in the form with current values
+    for (let key in rewardConfig) {
+        $('#' + key).val(rewardConfig[key]);
+    }
     $('#gameSpeed').change(function () {
         gameSpeed = $(this).val();
     }).val(gameSpeed);
