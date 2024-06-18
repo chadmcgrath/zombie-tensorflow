@@ -4,7 +4,7 @@
 <head>
 
   <meta charset="UTF-8">
-  <title>TF-Zombie simulator</title>
+  <title>TF-Zombie Simulator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/5.0.0/normalize.min.css">
   <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'>
@@ -18,24 +18,40 @@
       placeholder="Game Speed" />
   </div>
   <div class="flex-container" style="display: flex; justify-content: space-between;">
-    <div id="stats-container" class="flex-container">
+    <div id="stats-container"style ="min-width: 15em">
       <div>
-        RewardTotal
-        <div id='rewardTotal'></div>
-
-        missed shots:-.1
-        <div id='missed-shots'>0</div>
-        hit shots:1
-        <div id='hit-shots-baddy'>0</div>
-        hit shots human!!!:-1
-        <div id='hit-shots-human'>0</div>
-
-        <div id='turns'></div>
+  
+        <span>RewardTotal:</span>
+        <span id='rewardTotal'></span>
       </div>
+      <div>
+        <span>missed shots:</span>
+        <span id='missed-shots'>0</span>
+      </div>
+      <div>
+        <span>hit shots:</span>
+        <span id='hit-shots-baddy'>0</span>
+      </div>
+      <div>
+        <span>hit shots human!:</span>
+        <span id='hit-shots-human'>0</span>
+      </div>
+      <div>
+        <span>Turns:</span>
+        <span id='turns'></span>
+      </div>
+      <label for="skip-frames">Skip Frames</label>
+        <input type="range" id="skip-frames" min="0" max="20" step="1" value="0">
     </div>
     <div id="mid-container" class="flex-container">
       <div>
-        <h1>AI Zombie Apocolypse Quest</h1>
+        <h1>AI Zombie Apocalypse Super Quest</h1>
+        <h4>(you just kinda watch it for a while and see if the humans learn anything)</h4>
+          <p>
+            some zombie code from: https://codepen.io/hough/pen/PgZMKE <br/>
+            ppo reinforcement learning library from: https://github.com/zemlyansky/ppo-tfjs/<br/>
+            little bit of help from : https://cs.stanford.edu/people/karpathy/reinforcejs/waterworld.html<br/>
+          </p>
       </div>
     </div>
     <div id="button-container" class="button-container">
@@ -57,10 +73,12 @@
         <button onclick="loadModelFiles()">Load Models</button>
       </div> -->
       <div>
-        <button id="openRewardModal">Reward Configuration</button>
+        <button id="openRewardModal" class="btn btn-primary">Reward Configuration</button>
+        <button id="toggle-sprites" class="btn btn-primary">Toggle Sprites</button>
+        <br/>
         <label for="show-eyes">Show Eyes</label>
         <input type="range" id="show-eyes" min="0" max="2" step="1" value="0">
-        <button id="toggle-sprites" class="btn btn-primary">Toggle Sprites</button>
+        
       </div>
       <div>
         <button id="add-vampire-button" class="btn btn-primary">Add Vampire</button>
@@ -117,7 +135,7 @@
 
   <div id="rewardModal" class="modal">
     <div class="modal-content">
-      <span class="close">&times;</span>
+      <span class="close close-modal">&times;</span>
       <form id="rewardForm">
         <label for="hitShotReward">Hit Shot Reward</label>
         <input type="number" step="0.01" id="hitShotReward" name="hitShotReward">
@@ -139,8 +157,8 @@
         <input type="number" step="0.01" id="blockedVisionWall" name="blockedVisionWall">
         <label for="zombieProximityReward">Zombie Proximity Reward</label>
         <input type="number" step="0.01" id="zombieProximityReward" name="zombieProximityReward">
-        <button type="button" id="closeRewardModal" class="close">Close</button>
-        <button type="submit">Save Changes</button>
+        <button type="button" id="closeRewardModal" class="close-modal">Close</button>
+        <button type="submit">Apply</button>
       </form>
     </div>
   </div>

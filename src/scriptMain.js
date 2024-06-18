@@ -42,12 +42,9 @@ const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
 let zombieSpeed = 1;
 const humanSpeed = 3;
 let maxZombieSpeed = humanSpeed * 2 / 3;
-// Hyperparameters
 const numActions = 11;
 let batchSize = 512;//+$('#slider-batch').val();
-let epsilonGreedy = 0;
 const learningRate = .001;
-
 
 let rewardConfig = rewardConfigs.explore;
 for (let key in rewardConfig) {
@@ -55,7 +52,7 @@ for (let key in rewardConfig) {
         rewardConfig[key] *= (rewardConfig.baseReward || 1);
     }
 }
-const {
+let {
     hitShotReward,
     biteReward,
     hitHumanReward,
@@ -71,10 +68,8 @@ const {
 let isSprites = true;
 let showEyes = 0;
 const eyeMaxRange = 1000;
-
 let gameSpeed = 4;
-
-
+let skipFrames =0;
 const configPpo = {
     nSteps: batchSize,                 // Number of steps to collect rollouts
     nEpochs: 10,                 // Number of epochs for training the policy and value networks
@@ -321,16 +316,6 @@ Agent.prototype.zombify = async function (victim, zombie) {
 
 Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     this.moveFactor = this.isShot ? .1 : 1;
-    //var batchValue = $('#slider-batch').val();
-    var epsilonValue = 0;//$('#slider-epsilon').val();
-
-    epsilonGreedy = +epsilonValue;
-    //batchSize = +batchValue;
-    // // Setters
-    // $('#slider-batch').val(8); 
-    // $('#slider-lr').val(0.01); 
-    // $('#slider-epsilon').val(0.2); 
-
 
     if (this.isZ) {
         let inMelee = false;
@@ -638,7 +623,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     if (totalTurns > 10000 && totalTurns % 1000 === 0) {
         const numZombs = Math.min((totalTurns - 10000) / 2000, maxZombieSpawns);
         for (let i = 0; i < numZombs; i++) {
-            addUnit({ type: 'zombie', pos: zombieHousePos, speed: Math.min(zombieSpeed + totalTurns / 40000, maxZombieSpeed) });
+            addUnit({ type: 'zombie', speed: Math.min(zombieSpeed + totalTurns / 40000, maxZombieSpeed) });
         }
     }
     let zombies = agents.filter(agent => agent.isZ);
@@ -655,9 +640,10 @@ async function mainLoop(time, action, agentExperienceResult) {
 
     let humans = agents.filter(agent => agent.isHuman);
     if (humans.length < minHumans) {
+        const hasLearning = humans.some(h => h.isLearning);
         // get random building, human comes out of it
         const block = blocks[Math.floor(Math.random() * blocks.length)];
-        addUnit({ type: 'human', pos: new Vec(block.pos.x, block.pos.y) });
+        addUnit({ type: 'human', pos: new Vec(block.pos.x, block.pos.y)}, !hasLearning );
         humans = agents.filter(agent => agent.isHuman);
     }
     hCnt = humans.length;
@@ -669,11 +655,14 @@ async function mainLoop(time, action, agentExperienceResult) {
         }
         else {
             // these are the other humans. they use the best action, rather than the proximal action
-            const states = (humans[i].states && humans[i].states.length > 0) ? humans[i].states : await humans[i].getStates();
+            const states = [...(humans[i].states && humans[i].states.length > 0) ? humans[i].states : await humans[i].getStates()];
             const [preds, actionProximal, value, logprobability] = await ppo.getSample(states);
             humans[i].isLearning = false;
             const action = tf.argMax(preds).dataSync()[0];
             const rets = await humans[i].logic(clock, action);
+
+            // this doesn't seem to work, maybe I'm adding something wrong to the buffer
+            // skippin it by making  the if statement false
             if (i < 1) {
                 // hack to add argMax agent to add to buffer in seequence
                 humans[i].experiences.push([states,
@@ -710,7 +699,6 @@ async function mainLoop(time, action, agentExperienceResult) {
     ctx.fillText(msg, ctx.canvas.width / 3 + 1, 21);
     ctx.fillStyle = 'white';
     ctx.fillText(msg, ctx.canvas.width / 3, 20);
-
     ctx.beginPath();
     ctx.fillStyle = 'white';
     ctx.fill();
@@ -746,7 +734,7 @@ class Env {
             reward: null
         };
         loopCount++;
-        if (loopCount > batchSize || !continueLoop) {
+        if ((loopCount > batchSize || !continueLoop) && (skipFrames===0 || loopCount % skipFrames === 0)) {
             if (loopCount > batchSize)
                 loopCount = 0;
 
@@ -761,13 +749,12 @@ class Env {
                 $("#current-state").text(agents.find(a => a.isHuman).states.join(', '));
 
                 createOrUpdateRewardChart(rewardOverTime, batchSize)
-                //await createOrUpdateLossesChart();
-
+                await createOrUpdateLossesChart();
             }
 
             ctx = canvas.getContext('2d');
             await requestAnimationFrameAsync(async (time) => await mainLoop(time, action, agentExperienceResult));
-        } else if (continueLoop) {
+        } else{
             // don't draw. just keep going and train the model
             ctx = {
                 isDummy: true,
@@ -887,7 +874,8 @@ async function removeUnit(unit) {
     }
     agents = agents.filter(a => a !== unit);
 }
-async function addUnit(config) {
+
+async function addUnit(config, isLearning=false) {
     ++maxId;
     const a = new Agent({
         id: maxId,
@@ -897,7 +885,10 @@ async function addUnit(config) {
         speed: config.speed || null,
 
     });
-    agents.push(a);
+    if(isLearning)
+        agents.unshift(a);
+    else
+        agents.push(a)
     const humans = agents.filter(a => a.isHuman === true);
     humans.forEach(h => {
         h.items = agents.filter(a => a.id !== h.id);
@@ -998,13 +989,12 @@ const loadModelFiles = async () => {
     ppo.critic = await tf.loadLayersModel(criticUrl);
 }
 var rewardModal = $('#rewardModal');
-    var span = $('.close')[0];
 
     $('#openRewardModal').click(function() {
         rewardModal.show();
     });
 
-    $('.close').click(function() {
+    $('.close-modal').click(function() {
         rewardModal.hide();
     });
 
@@ -1017,11 +1007,24 @@ var rewardModal = $('#rewardModal');
 $('#rewardForm').submit(function(event) {
     event.preventDefault();
     let rewardConfig = $(this).serializeArray().reduce(function(obj, item) {
-        obj[item.name] = item.value;
+        obj[item.name] = +item.value;
         return obj;
     }, {});
     console.log(rewardConfig); // Logs the form data to the console
+    ({
+        hitShotReward,
+        biteReward,
+        hitHumanReward,
+        missedShotReward,
+        bumpWallReward,
+        bumpScreenReward,
+        bumpHumanReward,
+        blockedVisionHuman,
+        blockedVisionWall,
+        zombieProximityReward
+    } = rewardConfig);
 });
+
 //const zombieSpeedElement = $('#zombieSpeed');
 //zombieSpeedElement.addEventListener('change', updateZombieSpeed);
 //let zombieSpeed
@@ -1032,13 +1035,11 @@ $('#maxZombieSpeed').change(function () {
 // document.getElementById('actorInput').addEventListener('change', loadActorModel);
 // document.getElementById('criticInput').addEventListener('change', loadCriticModel);
 
-
-function updateRadius(event) {
-    radius = event.target.value;
-    // Update radius in your application
-}
 $('#show-eyes').on('input', function () {
     showEyes = +$(this).val();
+});
+$('#skip-frames').on('input', function () {
+    skipFrames = +$(this).val();
 });
 (async function () {
 
