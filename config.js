@@ -1,4 +1,4 @@
-// this seems to fascilitate a little bit of exploring, rathert han just facing a wall waiting to die.
+// this seems to fascilitate a little bit of exploring, rather than just facing a wall waiting to die.
 // seems to cause disco head
 const rewardConfigs={
     default: {
@@ -15,13 +15,12 @@ const rewardConfigs={
         farVisionReward: 0,
         zombieProximityReward: 0
     },
-    // some disco head her
     explore: {
         baseReward: 1,
         hitShotReward: 1,
         biteReward: -1,
         hitHumanReward: -1,
-        missedShotReward: -.125,
+        missedShotReward: -.1,
         bumpWallReward: -.5,
         bumpScreenReward: -.5,
         bumpHumanReward: -.65,

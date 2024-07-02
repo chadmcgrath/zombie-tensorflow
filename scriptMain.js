@@ -35,7 +35,7 @@ let hitShotsBaddy = 0;
 let hitShotsHuman = 0;
 const minHumans = 2;
 const minZombies = 3;
-const maxZombieSpawns = 15;
+const maxZombieSpawns = 40;
 
 const zombieGreen = "#2f402f";
 const zombieHousePos = new Vec(ctx.canvas.width / 2, ctx.canvas.height / 2);
@@ -171,11 +171,9 @@ Agent.prototype.getVision = function () {
         // we have a line from p to p->eyep
         var eyep = new Vec(a.pos.x + e.max_range * currentEyeAnglePointing.x,
             a.pos.y + e.max_range * currentEyeAnglePointing.y);
-
         if (isNaN(eyep.x)) {
             console.error('eyep.x is NaN');
         }
-
         var res = stuff_collide(a, eyep, blocks, true, true);
         if (res) {
             // eye collided with anything
@@ -209,7 +207,7 @@ Agent.prototype.getVision = function () {
         // clip whether it cares about walls that are far away
         // if (type === -.1 && sr > 100)
         //     type = 0;
-
+        // we really shouldn't be doing this here, but it's a quick way to get the reward
         if (ei === 0) {
             if (e.sensed_type === 1)
                 this.rewardSignal = this.rewardSignal + blockedVisionHuman;
@@ -226,6 +224,7 @@ Agent.prototype.getVision = function () {
         eyeStates.push(e.sensed_proximity/e.max_range, type);
         //eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
     }
+    // we really shouldn't be doing this here, but it's a quick way to get the reward
     this.rewardSignal = this.rewardSignal + zombieProximityReward * (1 - e.sensed_proximity / e.max_range);
 
     // tensorflow inputs
@@ -536,8 +535,9 @@ Agent.prototype.shoot = (agent) => {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
         // to do: for now, we disgourage it from stopping and missing.
-        agent.rewardSignal = agent.rewardSignal + missedShotReward;
-        negRewards = negRewards + missedShotReward;
+        const r = agent.rewardSignal + missedShotReward - Math.min(4,1 * (hitShotsBaddy)/1000);
+        agent.rewardSignal = r;
+        negRewards +=r;
         missedShots += 1;
         ctx.strokeStyle = 'purple';
     }
@@ -621,7 +621,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     for (let i = 0, l = blocks.length; i < l; i++)
         blocks[i].draw(ctx);
     if (totalTurns > 10000 && totalTurns % 1000 === 0) {
-        const numZombs = Math.min((totalTurns - 10000) / 2000, maxZombieSpawns);
+        const numZombs = Math.min((totalTurns - 10000) / 4000, maxZombieSpawns);
         for (let i = 0; i < numZombs; i++) {
             addUnit({ type: 'zombie', speed: Math.min(zombieSpeed + totalTurns / 40000, maxZombieSpeed) });
         }
@@ -656,6 +656,7 @@ async function mainLoop(time, action, agentExperienceResult) {
         else {
             // these are the other humans. they use the best action, rather than the proximal action
             const states = [...(humans[i].states && humans[i].states.length > 0) ? humans[i].states : await humans[i].getStates()];
+
             const [preds, actionProximal, value, logprobability] = await ppo.getSample(states);
             humans[i].isLearning = false;
             const action = tf.argMax(preds).dataSync()[0];
@@ -663,7 +664,7 @@ async function mainLoop(time, action, agentExperienceResult) {
 
             // this doesn't seem to work, maybe I'm adding something wrong to the buffer
             // skippin it by making  the if statement false
-            if (i < 1) {
+            if (i < 2) {
                 // hack to add argMax agent to add to buffer in seequence
                 humans[i].experiences.push([states,
                     action,
@@ -1121,7 +1122,7 @@ $('#skip-frames').on('input', function () {
     const env = new Env();
     ppo = new PPO(env, configPpo);
     await ppo.learn({
-        'totalTimesteps': 10000000,
+        'totalTimesteps': Infinity,
         'callback': {
             'onTrainingStart': function (p) {
                 console.log(p.config)

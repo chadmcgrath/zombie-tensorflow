@@ -5,7 +5,7 @@ body {
   color: #aaa;
 }
 
-#canvas {
+.canvas-city {
   margin:10px;
   background-color: #333; /* This represents the streets */
     background-image: 
@@ -13,7 +13,11 @@ body {
         linear-gradient(rgba(255,255,255,.5) 2%, rgba(255,255,255,.5) 4%, transparent 5%, transparent 74%, rgba(255,255,255,.5) 75%, rgba(255,255,255,.5) 76%, transparent 77%, transparent);
 
 }
-
+.canvas-space {
+  margin: 10px;
+  background: #000 url('https://www.transparenttextures.com/patterns/stardust.png');
+  background-size: cover;
+}
 .button-container {
   display: flex;
   justify-content: space-between;

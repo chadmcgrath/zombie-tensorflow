@@ -251,6 +251,7 @@ class PPO {
         } else if (this.env.actionSpace.class == 'Box') {
             l = tf.layers.dense({
                 units: this.env.actionSpace.shape[0], 
+                activation: 'tanh',
                 // kernelInitializer: 'glorotNormal'
             }).apply(l)
         } else {

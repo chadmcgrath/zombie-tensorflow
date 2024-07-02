@@ -6,11 +6,11 @@ function createWindow () {
     height: 600,
     webPreferences: {
       nodeIntegration: true,
-      backgroundThrottling: false, // Add this line
+      backgroundThrottling: false, 
     }
   })
 
-  win.loadFile('index.html')  // Load your HTML file
+  win.loadFile('indexShips.html') 
 }
 
 app.whenReady().then(() => {

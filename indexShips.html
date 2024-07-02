@@ -13,6 +13,13 @@
 </head>
 
 <body>
+
+  <div id="canvas-container" class="flex-container outer-space">
+    <div id="div1">
+      <canvas id="canvas" class="canvas-space" width="1400" height="780"></canvas>
+    </div>
+
+  </div>
   <div>
     <input id="gameSpeed" type="range" min="1" max="20" step="1" value="4" title="Game Speed"
       placeholder="Game Speed" />
@@ -41,16 +48,14 @@
         <span id='turns'></span>
       </div>
       <label for="skip-frames">Skip Frames</label>
-        <input type="range" id="skip-frames" min="0" max="20" step="1" value="0">
+        <input type="range" id="skip-frames" min="0" max="512" step="1" value="0">
     </div>
     <div id="mid-container" class="flex-container">
       <div>
-        <h1>AI Zombie Apocalypse Super Quest</h1>
-        <h4>(you just kinda watch it for a while and see if the humans learn anything)</h4>
+        <h1>AI Outer-Space Fighter Super Quest! .js</h1>
+        <h4>space ships. dey fite</h4>
           <p>
-            some zombie code from: Paul Robello (https://codepen.io/paulrobello/pen/LNvEvx) <br/>
             ppo reinforcement learning library from: https://github.com/zemlyansky/ppo-tfjs/<br/>
-            little bit of help from : https://cs.stanford.edu/people/karpathy/reinforcejs/waterworld.html<br/>
           </p>
       </div>
     </div>
@@ -95,12 +100,6 @@
       </div>
     </div>
   </div>
-  <div id="canvas-container" class="flex-container">
-    <div id="div1">
-      <canvas id="canvas" class="canvas-city" width="1200" height="500"></canvas>
-    </div>
-
-  </div>
   <div>
     <!-- <label for="slider-batch">BatchSize:</label>
     <span id="batch-value"></span> -->
@@ -130,6 +129,7 @@
     <div id="weights"></div>
     CW
     <div id="criticWeights"></div>
+    current state
     <div id="current-state">weights</div>
   </div>
 
@@ -191,7 +191,7 @@
   <script src="./config.js"></script>
   <script src="./ppo.js"></script>
   <script src="./utilities.js"></script>
-  <script src="./scriptMain.js"></script>
+  <script src="./ships.js"></script>
 
 </body>
 

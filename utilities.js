@@ -157,31 +157,27 @@ Square.prototype.rayIntersect = function (o, d) {
     return [p1, p2];
 }
 
-// A 2D vector utility (Karpathy)
+// A 2D vector utility (originally from Karpathy)
+
 const Vec = function (x, y) {
-    this.x = x;
-    this.y = y;
+    const vec = {
+        x: x?.x !== undefined && x?.y !== undefined ? x.x : x,
+        y: x?.x !== undefined && x?.y !== undefined ? x.y : y,
+        distFrom: function (v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); },
+        length: function () { return Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2)); },
+        add: function (v) { return Vec(this.x + v.x, this.y + v.y); },
+        sub: function (v) { return Vec(this.x - v.x, this.y - v.y); },
+        rotate: function (a) {  // CLOCKWISE
+            return Vec(this.x * Math.cos(a) + this.y * Math.sin(a),
+                -this.x * Math.sin(a) + this.y * Math.cos(a));
+        },
+        getAngle: function () { return Math.atan2(this.y, this.x); },
+        getUnit: function () { var d = this.length(); return Vec(this.x / d, this.y / d); },
+        scale: function (s) { this.x *= s; this.y *= s; },
+        normalize: function () { var d = this.length(); this.scale(1.0 / d); }
+    };
+    return vec;
 }
-Vec.prototype = {
-
-    // utilities
-    distFrom: function (v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); },
-    length: function () { return Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2)); },
-
-    // new vector returning operations
-    add: function (v) { return new Vec(this.x + v.x, this.y + v.y); },
-    sub: function (v) { return new Vec(this.x - v.x, this.y - v.y); },
-    rotate: function (a) {  // CLOCKWISE
-        return new Vec(this.x * Math.cos(a) + this.y * Math.sin(a),
-            -this.x * Math.sin(a) + this.y * Math.cos(a));
-    },
-    getAngle: function () { return Math.atan2(this.y, this.x); },
-    getUnit: function () { var d = this.length(); return new Vec(this.x / d, this.y / d); },
-    // in place operations
-    scale: function (s) { this.x *= s; this.y *= s; },
-    normalize: function () { var d = this.length(); this.scale(1.0 / d); }
-}
-
 function line_intersect(line1Start, line1End, line2Start, line2End) {
     let denominator = ((line2End.y - line2Start.y) * (line1End.x - line1Start.x)) - ((line2End.x - line2Start.x) * (line1End.y - line1Start.y));
 
@@ -201,7 +197,7 @@ function line_intersect(line1Start, line1End, line2Start, line2End) {
 
     return { ua, ub, up: new Vec(x, y) };
 }
-var line_point_intersect = function (p1, p2, p0, rad) {
+const line_point_intersect = function (p1, p2, p0, rad) {
     p0 = new Vec(p0.x, p0.y);
     var v = new Vec(p2.y - p1.y, -(p2.x - p1.x)); // perpendicular vector
     var d = Math.abs((p2.x - p1.x) * (p1.y - p0.y) - (p1.x - p0.x) * (p2.y - p1.y));

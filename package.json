@@ -4,7 +4,7 @@
 	"description": "",
 	"main": "main.js",
 	"scripts": {
-		"start": "electron ."
+		 "start": "electron --max-old-space-size=4096 main.js"
 	},
 	"dependencies": {
 		"electron": "^30.0.2"
