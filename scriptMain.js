@@ -43,8 +43,6 @@ let zombieSpeed = 1;
 const humanSpeed = 3;
 let maxZombieSpeed = humanSpeed * 2 / 3;
 const numActions = 11;
-let batchSize = 512;//+$('#slider-batch').val();
-const learningRate = .001;
 
 let rewardConfig = rewardConfigs.explore;
 for (let key in rewardConfig) {
@@ -70,6 +68,9 @@ let showEyes = 0;
 const eyeMaxRange = 1000;
 let gameSpeed = 4;
 let skipFrames =0;
+
+let batchSize = 512;//+$('#slider-batch').val();
+const learningRate = .001;
 const configPpo = {
     nSteps: batchSize,                 // Number of steps to collect rollouts
     nEpochs: 10,                 // Number of epochs for training the policy and value networks
@@ -535,8 +536,8 @@ Agent.prototype.shoot = (agent) => {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
         // to do: for now, we disgourage it from stopping and missing.
-        const r = agent.rewardSignal + missedShotReward - Math.min(4,1 * (hitShotsBaddy)/1000);
-        agent.rewardSignal = r;
+        const r = missedShotReward - Math.min(4,1 * (hitShotsBaddy)/10000);
+        agent.rewardSignal += r;
         negRewards +=r;
         missedShots += 1;
         ctx.strokeStyle = 'purple';
@@ -664,7 +665,7 @@ async function mainLoop(time, action, agentExperienceResult) {
 
             // this doesn't seem to work, maybe I'm adding something wrong to the buffer
             // skippin it by making  the if statement false
-            if (i < 2) {
+            if (i < 1) {
                 // hack to add argMax agent to add to buffer in seequence
                 humans[i].experiences.push([states,
                     action,
@@ -686,7 +687,6 @@ async function mainLoop(time, action, agentExperienceResult) {
                             logprobability);
                     };
                     humans[i].experiences = [];
-
                 }
             }
         }

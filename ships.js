@@ -6,6 +6,8 @@
 
 /* global tf */
 //tf.enableDebugMode();//
+const isDiscrete = false;
+const isSpace = false;
 tf.setBackend('cpu');
 const shipsConfigBots = {
     numShips: 20,
@@ -23,15 +25,15 @@ let beams = [];
 
 const draw = (ships) => {
     const now = Date.now();
-    
+
     // Draw and filter beams in one pass
     beams = beams.filter(beam => {
         const { start, end, color, width, time, lifeTime } = beam;
         const age = now - time;
         const opacity = 1 - age / lifeTime;
-        
+
         if (opacity <= 0) return false;
-        
+
         ctx.lineWidth = width * opacity;
         ctx.strokeStyle = color;
         ctx.globalAlpha = opacity;
@@ -39,10 +41,10 @@ const draw = (ships) => {
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
         ctx.stroke();
-        
+
         return true;
     });
-    
+
     ctx.globalAlpha = 1;
 
     // Reusable objects for ship drawing
@@ -60,7 +62,7 @@ const draw = (ships) => {
         const base = 4 * height;
         p1.x = -height / 2; p1.y = -base / 2;
         p2.x = -height / 2; p2.y = base / 2;
-        p3.x = height / 2;  p3.y = 0;
+        p3.x = height / 2; p3.y = 0;
 
         rotatePoint(p1, ship.direction, ship.position);
         rotatePoint(p2, ship.direction, ship.position);
@@ -75,6 +77,21 @@ const draw = (ships) => {
         ctx.fillStyle = ship.color;
         ctx.fill();
     });
+    // const learner = ships.find(a => a.isLearner);
+    // // show white lines from pi/64 to -pi/64 from current direction
+    // ctx.strokeStyle = 'white';
+    // ctx.beginPath();
+    // ctx.moveTo(learner.position.x, learner.position.y);
+    // ctx.lineTo(
+    //     learner.position.x + (new Vec(learner.direction).rotate(Math.PI/64).x *1000),
+    //     learner.position.y + (new Vec(learner.direction).rotate(Math.PI/64).y * 1000),
+    // );
+    // ctx.moveTo(learner.position.x, learner.position.y);
+    // ctx.lineTo(
+    //     learner.position.x + (new Vec(learner.direction).rotate(-Math.PI/64).x * 1000),
+    //     learner.position.y + (new Vec(learner.direction).rotate(-Math.PI/64).y * 1000),
+    // );
+    // ctx.stroke();
 
     // const learner = ships.find(a => a.isLearner);
     // if (learner) {
@@ -100,7 +117,6 @@ const draw = (ships) => {
     // }
 }
 
-// Assume this helper function is defined elsewhere
 function rotatePoint(point, direction, center) {
     const cos = direction.x;
     const sin = direction.y;
@@ -109,74 +125,57 @@ function rotatePoint(point, direction, center) {
     point.x = x * cos - y * sin + center.x;
     point.y = x * sin + y * cos + center.y;
 }
-const drawOld = (ships) => {
-    // Draw the beams   
-    beams.forEach(beam => {
-        const { start, end, color, width, time, lifeTime } = beam;
-        const age = Date.now() - time;
-        const opacity = 1 - age / lifeTime;
-        if (opacity <= 0) return;
-        ctx.lineWidth = width * (1 - age / lifeTime);
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.moveTo(start.x, start.y);
-        ctx.lineTo(end.x, end.y);
-        ctx.globalAlpha = opacity;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-    });
-    // remove beam if opacity is 0
-    beams.forEach((beam, i) => {
-        if (beam.opacity === 0) {
-            beams.splice(i, 1);
-        }
-    });
-    ships.forEach(ship => {
-        // Draw the shield
-        ctx.beginPath();
-        ctx.arc(ship.position.x, ship.position.y, ship.shield.radius, 0, Math.PI * 2, false);
+function calculateTurnDirectionVector(basePosition, baseDirection, targetPosition) {
+    // Calculate the vector from base to target
+    const vectorToTarget = {
+        x: targetPosition.x - basePosition.x,
+        y: targetPosition.y - basePosition.y
+    };
 
-        // Color the shield
-        ctx.fillStyle = getColor(ship.hp, 0, ship.maxHp, .3);
-        ctx.fill();
-        let height = ship.shield.radius / 2;
-        let base = 4 * height;
+    // Normalize the vector to target
+    const magnitudeToTarget = Math.sqrt(vectorToTarget.x ** 2 + vectorToTarget.y ** 2);
+    const normalizedVectorToTarget = {
+        x: vectorToTarget.x / magnitudeToTarget,
+        y: vectorToTarget.y / magnitudeToTarget
+    };
 
-        let p1 = { x: ship.position.x - height / 2, y: ship.position.y - base / 2 };
-        let p2 = { x: ship.position.x - height / 2, y: ship.position.y + base / 2 };
-        let p3 = { x: ship.position.x + height / 2, y: ship.position.y };
+    // Normalize the base direction
+    const magnitudeBaseDirection = Math.sqrt(baseDirection.x ** 2 + baseDirection.y ** 2);
+    const normalizedBaseDirection = {
+        x: baseDirection.x / magnitudeBaseDirection,
+        y: baseDirection.y / magnitudeBaseDirection
+    };
 
-        p1 = rotatePoint(p1, ship.direction, ship.position);
-        p2 = rotatePoint(p2, ship.direction, ship.position);
-        p3 = rotatePoint(p3, ship.direction, ship.position);
+    // The direction to turn to face the target can be represented as the difference between the normalized target vector and the base direction
+    const turnDirectionVector = {
+        x: normalizedVectorToTarget.x - normalizedBaseDirection.x,
+        y: normalizedVectorToTarget.y - normalizedBaseDirection.y
+    };
 
-        // Draw the triangle
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.lineTo(p3.x, p3.y);
-        ctx.closePath();
+    // Optionally, normalize the turn direction vector if a unit vector is desired
+    const magnitudeTurnDirection = Math.sqrt(turnDirectionVector.x ** 2 + turnDirectionVector.y ** 2);
+    const normalizedTurnDirectionVector = {
+        x: turnDirectionVector.x / magnitudeTurnDirection,
+        y: turnDirectionVector.y / magnitudeTurnDirection
+    };
 
-        ctx.fillStyle = ship.color;
-        ctx.fill();
-
-    });
-    const learner = ships.find(a => a.isLearner);
-    const otherShips = learner.getOrderedShips();
-    // draw purple line in learner.direction
-    ctx.beginPath();
-    ctx.strokeStyle = 'purple';
-    ctx.moveTo(learner.position.x, learner.position.y);
-    ctx.lineTo(learner.position.x + learner.direction.x * 100, learner.position.y + learner.direction.y * 100);
-    ctx.stroke();
-    otherShips.forEach(ship => {
-        ctx.beginPath();
-        ctx.strokeStyle = 'green';
-        ctx.moveTo(learner.position.x, learner.position.y);
-        ctx.lineTo(ship.position.x, ship.position.y);
-        ctx.stroke();
-    });
-
+    return normalizedTurnDirectionVector;
+}
+function calculateRelativeDirection(basePosition, baseDirection, targetPosition) {
+    // Calculate the vector from base to target
+    const vectorToTarget = {
+        x: targetPosition.x - basePosition.x,
+        y: targetPosition.y - basePosition.y
+    };
+    // Calculate the angle of this vector
+    const angleToTarget = Math.atan2(vectorToTarget.y, vectorToTarget.x);
+    // Calculate the angle of the base direction
+    const baseAngle = Math.atan2(baseDirection.y, baseDirection.x);
+    // Calculate the relative angle
+    let relativeAngle = angleToTarget - baseAngle;
+    // Normalize the angle to be between -π and π
+    relativeAngle = (relativeAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    return relativeAngle / Math.PI;
 }
 
 function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, baseDiameter, direction, position, velocity) {
@@ -198,7 +197,7 @@ function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, base
         direction: direction,
         position: position,
         velocity: velocity,
-        acceleration: acceleration || .001,
+        acceleration: acceleration || .0001,
         isBot: isBot,
         isLearner: isLearner,
         getObservation: function () {
@@ -209,7 +208,7 @@ function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, base
                 done: false
             }
         },
-        getOrderedShips: function(){
+        getOrderedShips: function () {
             return ships.filter(x => x.id !== this.id).sort((a, b) => {
                 // Sort by team
                 if (a.team < b.team) return -1;
@@ -226,25 +225,29 @@ function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, base
             const velocityDenominator = 100;
             const positionDenominator = Math.max(canvas.width, canvas.height);
             const selfShip = [
-                this.direction.x,
-                this.direction.y,
+                //Math.atan2(this.direction.y, this.direction.x)/Math.PI,
+                ...(this.isSpace ? [this.direction.x, this.direction.y] : []),
                 this.velocity.x / velocityDenominator,
                 this.velocity.y / velocityDenominator,
                 this.position.x / positionDenominator,
-                this.position.y / positionDenominator,              
+                this.position.y / positionDenominator,
                 this.hp / this.maxHp,
 
             ];
             const otherShips = this.getOrderedShips();
 
             for (const ship of otherShips) {
+                const rel = calculateRelativeDirection(this.position, this.direction, ship.position);
                 const otherShip = [
-                    ship.direction.x,
-                    ship.direction.y,
+                    // rel,
+                    // Math.atan2(ship.direction.y, ship.direction.x)/Math.PI,
+                    Math.cos(rel),
+                    Math.sin(rel),
+                    ...(this.isSpace ? [this.direction.x, this.direction.y] : []),
                     (ship.velocity.x - this.velocity.x) / velocityDenominator,
                     (ship.velocity.y - this.velocity.y) / velocityDenominator,
                     (ship.position.x - this.position.x) / positionDenominator,
-                    (ship.position.y - this.position.y) / positionDenominator,              
+                    (ship.position.y - this.position.y) / positionDenominator,
                     ship.hp / ship.maxHp,
                     //ship.team===this.team?1:-1,
                 ];
@@ -254,33 +257,46 @@ function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, base
 
         },
         reflectOffScreen: function () {
+            let reflected = false;
             const radius = this.radius;
-            const maxSpeed = 10;
-            this.velocity = new Vec(this.velocity);
-            const speed = this.velocity.length();
-            if (speed >= maxSpeed)
-                this.velocity.scale(maxSpeed / speed);
+            const buffer = 1; // Small buffer to ensure the ship is fully off the edge
         
             if (this.position.x - radius < 0) {
-                this.velocity.x = -this.velocity.x; // Invert velocity
-                this.position.x = radius; // Correct position to just inside the boundary
+                this.velocity.x = Math.abs(this.velocity.x); // Ensure positive x velocity
+                this.position.x = radius + buffer;
+                reflected = true;
             } else if (this.position.x + radius > canvas.width) {
-                this.velocity.x = -this.velocity.x; // Invert velocity
-                this.position.x = canvas.width - radius; // Correct position to just inside the boundary
+                this.velocity.x = -Math.abs(this.velocity.x); // Ensure negative x velocity
+                this.position.x = canvas.width - radius - buffer;
+                reflected = true;
             }
             if (this.position.y - radius < 0) {
-                this.velocity.y = -this.velocity.y; // Invert velocity
-                this.position.y = radius; // Correct position to just inside the boundary
+                this.velocity.y = Math.abs(this.velocity.y); // Ensure positive y velocity
+                this.position.y = radius + buffer;
+                reflected = true;
             } else if (this.position.y + radius > canvas.height) {
-                this.velocity.y = -this.velocity.y; // Invert velocity
-                this.position.y = canvas.height - radius; // Correct position to just inside the boundary
+                this.velocity.y = -Math.abs(this.velocity.y); // Ensure negative y velocity
+                this.position.y = canvas.height - radius - buffer;
+                reflected = true;
+            }
+            if (reflected) {
+                const maxSpeed = 1;
+                this.velocity = new Vec(this.velocity);
+                const speed = this.velocity.length();
+                if (speed > maxSpeed)
+                    this.velocity.scale(maxSpeed / speed);
+                this.rewardSignal -= .01;
+                
+                // Add a small random component to the velocity to help unstick the ship
+                this.velocity.x += (Math.random() - 0.5) * 0.1;
+                this.velocity.y += (Math.random() - 0.5) * 0.1;
             }
         },
-        move: function () {
+        move: function (reductionFactor) {
             this.reflectOffScreen();
             let dir = this.direction;
-            this.velocity.x += dir.x * this.acceleration;
-            this.velocity.y += dir.y * this.acceleration;
+            this.velocity.x += dir.x * this.acceleration * reductionFactor;
+            this.velocity.y += dir.y * this.acceleration * reductionFactor;
             this.position.x += this.velocity.x;
             this.position.y += this.velocity.y;
         },
@@ -300,40 +316,36 @@ function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, base
             }
             return closestShip;
         },
-        turnTowardsEnemy: function (ships) {
+        turnTowardsEnemy: function (ships, maxTurnRate) {
             // sometimes we already have picked a target
+            let deltaAngle = 0;
             let closestEnemy = ships.length < 2 ? ships?.[0] : this.getClosestEnemy(ships);
             if (closestEnemy) {
-                const maxTurnRate = Math.PI / 16;
                 let dx = closestEnemy.position.x - this.position.x;
                 let dy = closestEnemy.position.y - this.position.y;
                 let targetAngle = Math.atan2(dy, dx);
                 let currentAngle = Math.atan2(this.direction.y, this.direction.x);
-                let deltaAngle = targetAngle - currentAngle;
+                deltaAngle = targetAngle - currentAngle;
                 deltaAngle = ((deltaAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
                 deltaAngle = Math.max(-maxTurnRate, Math.min(maxTurnRate, deltaAngle));
 
                 // Add the deltaAngle to the current angle to get the new angle
                 let newAngle = currentAngle + deltaAngle;
                 this.direction.x = Math.cos(newAngle);
-                this.direction.y = Math.sin(newAngle);
-            }
+                this.direction.y = Math.sin(newAngle);              
+            } 
+            return deltaAngle;         
         },
         shoot: function (d, enemies) {
-            const endPoint = new Vec(
-                this.position.x + this.direction.x * d,
-                this.position.y + this.direction.y * d);
+            const endPoint = new Vec(this.position.x + this.direction.x * d, this.position.y + this.direction.y * d);
 
             for (let enemy of enemies) {
-                const { up } = line_point_intersect(new Vec(this.position.x, this.position.y), endPoint,
-                    new Vec(enemy.position.x, enemy.position.y), enemy.radius);
-                if (up) {
-
+                const { up, ua } = line_point_intersect(new Vec(this.position), endPoint,
+                    new Vec(enemy.position), enemy.radius);
+                if (up && ua >= 0 && ua <= 1) {
                     enemy.hp -= 1;
                     this.handleDingedReward(enemy);
                     if (!this.isBot) {
-                        // the learner gets a reward for hitting the enemy
-                        // learners team adds the reward to the array as well
                         this.handleHitReward(enemy);
                     }
                     beams.push({
@@ -342,22 +354,35 @@ function createShip(id, team, maxHp, acceleration, isBot, isLearner, color, base
                         color: this.color,
                         time: Date.now(),
                         width: 3,
-                        lifeTime: 1500, //seconds
-
+                        lifeTime: 1500,
                     });
-                    break;
+                }
+                else if (ua > 1 && !this.isBot) {
+                    // curiculum reward for seeing pointing at baddie
+                    this.rewardSignal += Math.min(1 / (ua), .4);
+                    beams.push({
+                        start: { ...this.position },
+                        end: up,
+                        color: this.isLearner ? 'purple' : 'orange',
+                        time: Date.now(),
+                        width: 1,
+                        lifeTime: 500,
+                    });
+                }
+                else {
+                    this.rewardSignal -= .01;
                 }
             }
         },
         handleHitReward: function (ship) {
-            const r = 2 + (1 - ship.hp / ship.maxHp);
+            const r = .5 + .5 * (1 - ship.hp / ship.maxHp);
             this.rewardSignal += r;
             //rewardSignals.push(r);
             //rewardSignals.push(1);
         },
         handleDingedReward: function (ship) {
-            //const r = 1 - ship.hp / ship.maxHp;
-            //ship.rewardSignal -= r;
+            const r = .5 * (.5 + .5 * ship.hp / ship.maxHp);
+            ship.rewardSignal -= r;
 
         },
     }
@@ -374,7 +399,7 @@ function createShips(shipConfig) {
     const sectionWidth = canvas.width / numTeams;
     const ships = Array.from({ length: numShips }, (_, i) => {
         const teamIndex = (i % numTeams);
-        
+
         const acceleration = .01;
         const isBot = teamIndex != 0;
         const maxHp = isBot ? 500 : 100000;
@@ -397,27 +422,27 @@ function createShips(shipConfig) {
 const learningRate = .001;
 const numShips = 6;
 const numTeams = 2;
-const batchSize = 512;
-const numInputs = numShips * (2 + 2 + 2 + 1);// + (numShips-1);//pos, vel, acc, shield + REMOVED team
+const batchSize = 1024;
+const numInputs = numShips * (2 + 2 + 1) + (numShips - 1) * 2 + (isSpace ? numShips * 2 : 0);//pos, vel, acc, shield + relatviedirection. REMOVED team
 
-const actions = [-Math.PI / 8, -Math.PI / 16, -Math.PI / 32, -Math.PI / 64, 0, Math.PI / 64, Math.PI / 32, Math.PI / 16, Math.PI / 8];
+const actions = [-Math.PI / 16, -Math.PI * 3 / 64, -Math.PI / 32, -Math.PI / 64, -Math.PI / 128, 0, Math.PI / 128, Math.PI / 64, Math.PI / 32, Math.PI * 3 / 64, Math.PI / 16];
 const configPpo = {
     nSteps: batchSize,                 // Number of steps to collect rollouts
     nEpochs: 20,                 // Number of epochs for training the policy and value networks
     policyLearningRate: learningRate,    // Learning rate for the policy network
     valueLearningRate: learningRate,     // Learning rate for the value network
     clipRatio: 0.2,              //.2- PPO clipping ratio for the objective function
-    targetKL: 0.02,            // .01-Target KL divergence for early stopping during policy optimization
+    targetKL: 0.015,            // .01-Target KL divergence for early stopping during policy optimization
     netArch: {
-        'pi': [numInputs*2, numInputs],           // Network architecture for the policy network
-        'vf': [numInputs*2, numInputs]           // Network architecture for the value network
+        'pi': [128, 64],           // Network architecture for the policy network
+        'vf': [128, 64]           // Network architecture for the value network
     },
     activation: 'elu',          //relu, elu Activation function to be used in both policy and value networks
     verbose: 0                // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
 }
 let ppo;
 let ships;
-
+const maxAngle = Math.PI / 256;
 async function shipTurns(action) {
     const observations = [];
     for (const ship of ships) {
@@ -435,11 +460,13 @@ async function shipTurns(action) {
                 const distanceB = Math.sqrt(Math.pow(b.position.x - ship.position.x, 2) + Math.pow(b.position.y - ship.position.y, 2));
                 return distanceA - distanceB;
             });
+
+        let angle = 0;
         if (ship.isBot) {
-            ship.turnTowardsEnemy([enemies?.[0]]);
+            angle = ship.turnTowardsEnemy([enemies?.[0]], maxAngle);
         }
         else if (ship.isLearner) {
-            const angle = actions[action];//action * Math.PI/8;//
+            angle = isDiscrete ? actions[action] : action * maxAngle;
             ship.direction = new Vec(ship.direction).rotate(angle).getUnit();
         }
         else {
@@ -447,19 +474,32 @@ async function shipTurns(action) {
             const states = ship.getStates();
             // eslint-disable-next-line no-unused-vars
             const [preds, actionProximal, value, logprobability] = await ppo.getSample(states);
-            const action = tf.argMax(preds).dataSync()[0];
-            const angle = actions[action];//preds * Math.PI/8;
+            if (isDiscrete) {
+                const action = tf.argMax(preds).dataSync()[0];
+                angle = actions[action];
+            } else {
+                angle = preds * maxAngle;
+            }
             ship.direction = new Vec(ship.direction).rotate(angle).getUnit();
         }
-        ship.shoot(1200, enemies);
-        ship.move();       
+        ship.shoot(400, enemies);
+        let reductionFactor = 1;
+        if (!isSpace) {
+            reductionFactor = 1 - (Math.abs(angle) * .9 / maxAngle);
+            ship.velocity = new Vec(ship.velocity);
+            const speed = ship.velocity.length();
+            ship.velocity = new Vec(ship.direction).getUnit();
+            ship.velocity.scale(speed);
+        }
+
+        ship.move(reductionFactor);
     }
     for (const ship of ships) {
         if (ship.isLearner) {
             const observation = ship.getObservation();
             observations.push(observation);
-        }       
-        if(!ship.isBot)
+        }
+        if (!ship.isBot)
             rewardSignals.push(ship.rewardSignal);
         ship.rewardSignal = 0;
     }
@@ -483,13 +523,14 @@ async function animate() {
 }
 class Env {
     constructor() {
-        this.actionSpace = {          
-                // 'class': 'Box',
-                // 'shape': [1],
-                // 'low': -1,
-                // 'high': 1,
+        this.actionSpace = isDiscrete ? {
             'class': 'Discrete',
             'n': actions.length,
+        } : {
+            'class': 'Box',
+            'shape': [1],
+            'low': -1,
+            'high': 1,
         }
         this.observationSpace = {
             'class': 'Box',
@@ -543,7 +584,7 @@ $('#skip-frames').on('input', function () {
     skipFrames = +$(this).val();
 });
 
-let avgRewardsGlobal = []; 
+let avgRewardsGlobal = [];
 let chart;
 
 function createOrUpdateRewardChart() {
@@ -612,9 +653,4 @@ function createOrUpdateRewardChart() {
         chart.data.datasets[1].data = movingAverage;
         chart.update();
     }
-
-    // Log some statistics
-    console.log('Total data points:', avgRewardsGlobal.length);
-    console.log('Latest average reward:', avgRewardsGlobal[avgRewardsGlobal.length - 1]);
-    console.log('Latest moving average:', movingAverage[movingAverage.length - 1]);
 }

@@ -198,28 +198,31 @@ function line_intersect(line1Start, line1End, line2Start, line2End) {
     return { ua, ub, up: new Vec(x, y) };
 }
 const line_point_intersect = function (p1, p2, p0, rad) {
-    p0 = new Vec(p0.x, p0.y);
-    var v = new Vec(p2.y - p1.y, -(p2.x - p1.x)); // perpendicular vector
-    var d = Math.abs((p2.x - p1.x) * (p1.y - p0.y) - (p1.x - p0.x) * (p2.y - p1.y));
-    d = d / v.length();
-    if (d > rad) { return false; }
+    var dx = p2.x - p1.x;
+    var dy = p2.y - p1.y;
+    var perp_dx = dy; // Perpendicular vector x-component
+    var perp_dy = -dx; // Perpendicular vector y-component
 
-    v.normalize();
-    v.scale(d);
-    var up = p0.add(v);
-    if (!up) {
-        console.log("up empty")
-    }
-    if (Math.abs(p2.x - p1.x) > Math.abs(p2.y - p1.y)) {
-        var ua = (up.x - p1.x) / (p2.x - p1.x);
+    // Direct calculation of perpendicular distance from point to line
+    var d = Math.abs(dx * (p1.y - p0.y) - (p1.x - p0.x) * dy) / Math.sqrt(perp_dx * perp_dx + perp_dy * perp_dy);
+    if (d > rad) return false;
+
+    // Normalize the perpendicular vector and scale by d
+    var len = Math.sqrt(perp_dx * perp_dx + perp_dy * perp_dy);
+    perp_dx = (perp_dx / len) * d;
+    perp_dy = (perp_dy / len) * d;
+
+    // Calculate the intersection point
+    var up = new Vec(p0.x + perp_dx, p0.y + perp_dy);
+
+    // Use the axis with the greater delta to calculate ua
+    var ua;
+    if (Math.abs(dx) > Math.abs(dy)) {
+        ua = (up.x - p1.x) / dx;
     } else {
-        // eslint-disable-next-line no-redeclare
-        var ua = (up.y - p1.y) / (p2.y - p1.y);
+        ua = (up.y - p1.y) / dy;
     }
-    if (ua > 0.0 && ua < 1.0) {
-        return { ua: ua, up: up };
-    }
-    return false;
+    return { ua: ua, up: up };
 }
 
 function lineIntersectsSquare(lineStart, lineEnd, square) {
@@ -293,7 +296,7 @@ const stuff_collide = (agent, p2, blocks, check_walls, check_items) => {
         for (var i = 0, n = agent.items.length; i < n; i++) {
             var it = agent.items[i];
             var res = line_point_intersect(p1, p2, it.pos, it.rad);
-            if (res) {
+            if (res && res.ua > 0 && res.ua < 1) {
                 res.vx = it.v.x; // velocty information
                 res.vy = it.v.y;
 
