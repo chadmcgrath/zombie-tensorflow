@@ -1,4 +1,3 @@
-
 /* global $ */
 /* global Chart */
 /* global PPO */
@@ -7,7 +6,10 @@
 /* global tf */
 //tf.enableDebugMode();//
 tf.setBackend('cpu');
-
+const maxAgents = 53;//windowArea / 10000;
+const numHumans = 50;
+const numLearners = 2;
+const numTrainers = 2;
 let zCnt = 0;
 let hCnt = 0;
 let agents = [];
@@ -119,7 +121,8 @@ function Agent(config) {
     this.id = config.id;
     this.experiences = [];
     this.states = [];
-    this.isLearning = false;
+    this.isLearning = config.isLearning || false;
+    this.isTrainer = config.isTrainer || false;
     const maxHp = 50;
     const eyeCount = numEyes;
     this.eyes = [];
@@ -312,9 +315,11 @@ Agent.prototype.zombify = async function (victim, zombie) {
     victim.currentHp = this.maxHp;
     victim.ring = 1;
     victim.state = 'idle';
+    victim.isLearning = false;
+    victim.isTrainer = false;
 }
 
-Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
+Agent.prototype.logic = async function (clock, action) {
     this.moveFactor = this.isShot ? .1 : 1;
 
     if (this.isZ) {
@@ -401,7 +406,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
         }
         else {
             this.moveFactor = 0;
-            this.shoot(this);
+            await this.shoot(this);
         }
         // stop if collided with another human
         if (this.eyes[0].sensed_type === 1 && this.eyes[0].sensed_proximity < this.rad * 2) {
@@ -456,12 +461,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
             newObservation: this.states,
             reward: this.rewardSignal,
             done: false
-        }
-        // for the ppo model
-        if (agentExperienceResult) {
-            agentExperienceResult.newObservation = this.states;
-            agentExperienceResult.reward = this.rewardSignal;
-        }
+        };
 
         totalRewards += this.rewardSignal;
         rewardOverTime.push(this.rewardSignal);
@@ -499,7 +499,7 @@ Agent.prototype.CheckScreenBounds = function () {
         this.dir.normalize();
     }
 }
-Agent.prototype.shoot = (agent) => {
+Agent.prototype.shoot = async (agent) => {
 
     // Draw red line to the closest baddy
     ctx.lineWidth = 3;
@@ -526,16 +526,18 @@ Agent.prototype.shoot = (agent) => {
         closestTarget.currentHp--;
         if (closestTarget.currentHp < 1) {
             closestTarget.ring = 5;
-            console.log('killed target' + closestTarget.id + closestTarget.type);
+            console.log('agent ' + agent.id + ' killed target ' + closestTarget.id + closestTarget.type + ' on turn ' + totalTurns);
             //todo: remove or create some kinda goodie
             // this will remove humans too, but w
-            removeUnit(closestTarget);
+            closestTarget.dead =true;
+            //!closestTarget.isHuman && await removeUnit(closestTarget);
+            await removeUnit(closestTarget);
         }
     }
     else {
 
         // missed! purple line is missed shot. the agent did not move but shot nothing.
-        // to do: for now, we disgourage it from stopping and missing.
+        // to do: for now, we discourage it from stopping and missing.
         const r = missedShotReward - Math.min(4,1 * (hitShotsBaddy)/10000);
         agent.rewardSignal += r;
         negRewards +=r;
@@ -602,7 +604,7 @@ function drawRotatedImage(ctx, image, x, y, width, height, angle) {
     ctx.restore();
 }
 
-async function mainLoop(time, action, agentExperienceResult) {
+async function mainLoop(time, action, agentExperienceResults) {
     if (!time) {
         time = Date.now();
     }
@@ -644,15 +646,21 @@ async function mainLoop(time, action, agentExperienceResult) {
         const hasLearning = humans.some(h => h.isLearning);
         // get random building, human comes out of it
         const block = blocks[Math.floor(Math.random() * blocks.length)];
-        addUnit({ type: 'human', pos: new Vec(block.pos.x, block.pos.y)}, !hasLearning );
+        addUnit({ type: 'human', pos: new Vec(block.pos.x, block.pos.y)}, !hasLearning, true );
         humans = agents.filter(agent => agent.isHuman);
     }
     hCnt = humans.length;
 
     for (let i = 0, l = humans.length; i < l; i++) {
-        if (i === 0) {
+        if (i < numLearners) {
             humans[i].isLearning = true;
-            await humans[i].logic(clock, action, agentExperienceResult);
+            humans[i].isTrainer = true;
+            const rets = await humans[i].logic(clock, action, agentExperienceResults[i]);
+            agentExperienceResults[i] = rets;
+            if(!agentExperienceResults[i].newObservation)
+                console.error(`rets is undefined for human ${i}`);
+            
+
         }
         else {
             // these are the other humans. they use the best action, rather than the proximal action
@@ -662,32 +670,40 @@ async function mainLoop(time, action, agentExperienceResult) {
             humans[i].isLearning = false;
             const action = tf.argMax(preds).dataSync()[0];
             const rets = await humans[i].logic(clock, action);
-
-            // this doesn't seem to work, maybe I'm adding something wrong to the buffer
-            // skippin it by making  the if statement false
-            if (i < 1) {
-                // hack to add argMax agent to add to buffer in seequence
-                humans[i].experiences.push([states,
-                    action,
-                    rets.reward,
-                    value,
-                    logprobability]);
-
-                if (ppo.buffer.pointer === 0 && totalTurns > 0) {
-                    for (const [states,
-                        action,
-                        reward,
-                        value,
-                        logprobability] of humans[i].experiences) {
-                        ppo.buffer.add(
-                            states,
-                            action,
-                            reward,
-                            value,
-                            logprobability);
-                    };
-                    humans[i].experiences = [];
+            if (rets.newObservation === undefined) {
+                console.error(`rets is undefined for human ${i}`);
+            }
+            //OLD
+            if (i < 2) {
+                if (!humans[i]) {
+                    console.error(`Human ${i} was removed before trainer assignment`);
+                    continue;
                 }
+                humans[i].isTrainer = true;
+                agentExperienceResults[i] = rets;
+
+                // hack to add argMax agent to add to buffer in seequence
+                // humans[i].experiences.push([states,
+                //     action,
+                //     rets.reward,
+                //     value,
+                //     logprobability]);
+
+                // if (ppo.buffer.pointer === 0 && totalTurns > 0) {
+                //     for (const [states,
+                //         action,
+                //         reward,
+                //         value,
+                //         logprobability] of humans[i].experiences) {
+                //         ppo.buffer.add(
+                //             states,
+                //             action,
+                //             reward,
+                //             value,
+                //             logprobability);
+                //     };
+                //     humans[i].experiences = [];
+                // }
             }
         }
         humans[i].draw(ctx);
@@ -711,7 +727,7 @@ async function mainLoop(time, action, agentExperienceResult) {
     $("#hit-shots-baddy").text(hitShotsBaddy);
     $("#missed-shots").text(missedShots);
     $("#turns").text(totalTurns);
-    return agentExperienceResult;
+    return agentExperienceResults;
 }
 class Env {
     constructor() {
@@ -730,10 +746,14 @@ class Env {
         if (Array.isArray(action)) {
             action = action[0]
         }
-        const agentExperienceResult = {
+        const agentExperienceResults = [{
             newObservation: null,
             reward: null
-        };
+        },
+        {
+            newObservation: null,
+            reward: null
+        }];
         loopCount++;
         if ((loopCount > batchSize || !continueLoop) && (skipFrames===0 || loopCount % skipFrames === 0)) {
             if (loopCount > batchSize)
@@ -754,7 +774,7 @@ class Env {
             }
 
             ctx = canvas.getContext('2d');
-            await requestAnimationFrameAsync(async (time) => await mainLoop(time, action, agentExperienceResult));
+            await requestAnimationFrameAsync(async (time) => await mainLoop(time, action, agentExperienceResults));
         } else{
             // don't draw. just keep going and train the model
             ctx = {
@@ -768,17 +788,41 @@ class Env {
                 loopCount = 0;
                 continueLoop = false;
             }
-            await mainLoop(0, action, agentExperienceResult);
+            await mainLoop(0, action, agentExperienceResults);
         }
-        this.i += 1
-        return [agentExperienceResult.newObservation, agentExperienceResult.reward, false];
+        this.i += 1;
+        const newObservations = [];
+    const rewards = [];
+    const dones = [];
+        agentExperienceResults.forEach((r, index) =>{
+            if(!r.newObservation)
+                console.error(`rets.newobs is undefined for human ${index}`);
+            newObservations.push(r.newObservation);
+            rewards.push(r.reward);
+            dones.push(r.done);
+        });
+        return [newObservations, rewards, dones];
     }
     reset() {
         this.i = 0;
-        const states = agents.find(a => a.isHuman).states;
-        if (states.length > 0)
-            return states;
-        const array = new Array(this.observationSpace.shape[0]).fill(.1);
+        const humans = agents.filter(a => a.isHuman);
+        const trainers = humans.filter(h => h.isTrainer);
+        if (trainers.length < numTrainers) {
+            console.error('Not enough trainers ' + trainers.length + ' turn ' + totalTurns);
+        }
+        const array = [];
+        for (let i = 0; i < numTrainers; i++) {
+            if (trainers[i]) {
+                const state = trainers[i].states;
+                if (state && state.length > 0) {
+                    array.push(state);
+                } else {
+                    array.push(new Array(this.observationSpace.shape[0]).fill(0.1));
+                }
+            } else {
+                array.push(new Array(this.observationSpace.shape[0]).fill(0.1));
+            }
+        }
         return array;
     }
 }
@@ -876,10 +920,11 @@ async function removeUnit(unit) {
     agents = agents.filter(a => a !== unit);
 }
 
-async function addUnit(config, isLearning=false) {
+async function addUnit(config, isLearning=false, isTrainer = false) {
     ++maxId;
     const a = new Agent({
         id: maxId,
+        isTrainer : isTrainer,
         type: config.type || 'zombie',
         viewDist: 1000,
         pos: config?.pos ? new Vec(config.pos.x, config.pos.y) : new Vec(canvas.width * Math.random(), canvas.height * Math.random()),
@@ -1102,10 +1147,11 @@ $('#skip-frames').on('input', function () {
     }
     //blocks.push(new Square(riverConfig1));
     //blocks.push(new Square(riverConfig2));
-    const maxAgents = 53;//windowArea / 10000;
-    const numHumans = 50;
+
     for (let i = 0, l = maxAgents; i < l; i++) {
         agents.push(new Agent({
+            isTrainer : i< numTrainers,
+            isLearning : i <numLearners,
             id: i + 1,
             type: i < numHumans ? 'human' : 'zombie',
             viewDist: 1000,

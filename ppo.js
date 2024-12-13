@@ -3,7 +3,7 @@ if (typeof module === 'object' && module.exports) {
     var tf = require('@tensorflow/tfjs')
 }
 
-function log () {
+function log() {
     console.log('[PPO]', ...arguments)
 }
 
@@ -18,22 +18,22 @@ class BaseCallback {
         return this._onStep(alg)
     }
 
-    _onTrainingStart(alg) {}
+    _onTrainingStart(alg) { }
     onTrainingStart(alg) {
         this._onTrainingStart(alg)
     }
 
-    _onTrainingEnd(alg) {}
+    _onTrainingEnd(alg) { }
     onTrainingEnd(alg) {
         this._onTrainingEnd(alg)
     }
 
-    _onRolloutStart(alg) {}
+    _onRolloutStart(alg) { }
     onRolloutStart(alg) {
         this._onRolloutStart(alg)
     }
 
-    _onRolloutEnd(alg) {}
+    _onRolloutEnd(alg) { }
     onRolloutEnd(alg) {
         this._onRolloutEnd(alg)
     }
@@ -65,7 +65,7 @@ class DictCallback extends BaseCallback {
         }
         return true
     }
-    
+
     _onTrainingStart(alg) {
         if (this.callback && this.callback.onTrainingStart) {
             this.callback.onTrainingStart(alg)
@@ -112,7 +112,7 @@ class Buffer {
         this.pointer += 1
     }
 
-    discountedCumulativeSums (arr, coeff) {
+    discountedCumulativeSums(arr, coeff) {
         let res = []
         let s = 0
         arr.reverse().forEach(v => {
@@ -143,10 +143,10 @@ class Buffer {
             tf.mean(this.advantageBuffer).arraySync(),
             tf.moments(this.advantageBuffer).variance.sqrt().arraySync()
         ])
-        
+
         this.advantageBuffer = this.advantageBuffer
             .map(advantage => (advantage - advantageMean) / advantageStd)
-        
+
         return [
             this.observationBuffer,
             this.actionBuffer,
@@ -235,58 +235,58 @@ class PPO {
     }
 
     createActor() {
-        const input = tf.layers.input({shape: this.env.observationSpace.shape})
+        const input = tf.layers.input({ shape: this.env.observationSpace.shape })
         let l = input
         this.config.netArch.pi.forEach((units, i) => {
             l = tf.layers.dense({
-                units, 
+                units,
                 activation: this.config.activation
             }).apply(l)
         })
         if (this.env.actionSpace.class == 'Discrete') {
             l = tf.layers.dense({
-                units: this.env.actionSpace.n, 
+                units: this.env.actionSpace.n,
                 // kernelInitializer: 'glorotNormal'
             }).apply(l)
         } else if (this.env.actionSpace.class == 'Box') {
             l = tf.layers.dense({
-                units: this.env.actionSpace.shape[0], 
+                units: this.env.actionSpace.shape[0],
                 //activation: 'tanh',
                 // kernelInitializer: 'glorotNormal'
             }).apply(l)
         } else {
             throw new Error('Unknown action space class: ' + this.env.actionSpace.class)
         }
-        return tf.model({inputs: input, outputs: l})
+        return tf.model({ inputs: input, outputs: l })
     }
 
     createCritic() {
         // Initialize critic
-        const input = tf.layers.input({shape: this.env.observationSpace.shape})
+        const input = tf.layers.input({ shape: this.env.observationSpace.shape })
         let l = input
         this.config.netArch.vf.forEach((units, i) => {
             l = tf.layers.dense({
-                units: units, 
+                units: units,
                 activation: this.config.activation
             }).apply(l)
         })
         l = tf.layers.dense({
-            units: 1, 
+            units: 1,
             activation: 'linear'
         }).apply(l)
-        return tf.model({inputs: input, outputs: l})
+        return tf.model({ inputs: input, outputs: l })
     }
 
     sampleAction(observationT) {
         return tf.tidy(() => {
             const preds = tf.squeeze(this.actor.predict(observationT), 0)
-            let action 
+            let action
             if (this.env.actionSpace.class == 'Discrete') {
                 action = tf.squeeze(tf.multinomial(preds, 1), 0) // > []
             } else if (this.env.actionSpace.class == 'Box') {
                 action = tf.add(
                     tf.mul(
-                        tf.randomStandardNormal([this.env.actionSpace.shape[0]]), 
+                        tf.randomStandardNormal([this.env.actionSpace.shape[0]]),
                         tf.exp(this.logStd)
                     ),
                     preds
@@ -306,7 +306,7 @@ class PPO {
             )
         })
     }
-    
+
     logProbNormal(loc, scale, x) {
         return tf.tidy(() => {
             const logUnnormalized = tf.mul(
@@ -337,8 +337,8 @@ class PPO {
             return this.logProbNormal(preds, tf.exp(this.logStd), actions)
         }
     }
-    
-    predict(observation, deterministic=false) {
+
+    predict(observation, deterministic = false) {
         return this.actor.predict(observation)
     }
 
@@ -360,9 +360,9 @@ class PPO {
             ))
             return policyLoss
         }
-    
+
         return tf.tidy(() => {
-            const {values, grads} = this.optPolicy.computeGradients(optFunc)
+            const { values, grads } = this.optPolicy.computeGradients(optFunc)
             this.optPolicy.applyGradients(grads)
             const kl = tf.mean(tf.sub(
                 logprobabilityBufferT,
@@ -377,9 +377,9 @@ class PPO {
             const valuesPredT = this.critic.predict(observationBufferT)
             return tf.losses.meanSquaredError(returnBufferT, valuesPredT)
         }
-                
+
         tf.tidy(() => {
-            const {values, grads} = this.optValue.computeGradients(optFunc)
+            const { values, grads } = this.optValue.computeGradients(optFunc)
             this.optValue.applyGradients(grads)
         })
     }
@@ -395,10 +395,9 @@ class PPO {
         if (typeof callback === 'object') {
             return new DictCallback(callback)
         }
-        return new BaseCallback() 
+        return new BaseCallback()
     }
-    async getSample(lastObservation)
-    {        
+    async getSample(lastObservation) {
         return tf.tidy(() => {
             const lastObservationT = tf.tensor([lastObservation])
             const [predsT, actionT] = this.sampleAction(lastObservationT)
@@ -424,62 +423,76 @@ class PPO {
         let sumLength = 0
         let numEpisodes = 0
 
-        const allPreds = []
-        const allActions = []
-        const allClippedActions = []
+        const agentBuffers = this.lastObservation.map(() => new Buffer(this.config))
 
-        while(this.buffer.pointer < this.config.nSteps){
-            // Predict action, value and logprob from last observation
-            const [preds, action, value, logprobability] = await this.getSample(this.lastObservation); 
-            allPreds.push(preds)
-            allActions.push(action)
+        while (this.buffer.pointer < this.config.nSteps) {
 
-            // Rescale for continuous action space
-            let clippedAction = action
-            if (this.env.actionSpace.class == 'Box') {
-                let h = this.env.actionSpace.high
-                let l = this.env.actionSpace.low
-                if (typeof h === 'number' && typeof l === 'number') {
-                    clippedAction = action.map(a => {
-                        return Math.min(Math.max(a, l), h)
-                    })
+            // Predict action, value and logprob for each agent from last observation
+            if (this.lastObservation.length < 1)
+                this.lastObservation = this.env.reset();
+            const agentData = await Promise.all(this.lastObservation.map(async (obs) => {
+                const [preds, action, value, logprobability] = await this.getSample(obs)
+                return { preds, action, value, logprobability }
+            }))
+
+            for (let index = 0; index < agentData.length; index++) {
+                const { preds, action, value, logprobability } = agentData[index];
+
+                // Rescale for continuous action space
+                let clippedAction = action;
+                if (this.env.actionSpace.class == 'Box') {
+                    let h = this.env.actionSpace.high;
+                    let l = this.env.actionSpace.low;
+                    if (typeof h === 'number' && typeof l === 'number') {
+                        clippedAction = action.map(a => {
+                            return Math.min(Math.max(a, l), h);
+                        });
+                    }
                 }
+
+                // Take action in environment
+                const [newObservations, rewards, dones] = await this.env.step(clippedAction);
+                sumReturn += rewards[index];
+                sumLength += 1;
+
+                // Update global timestep counter
+                this.numTimesteps += 1;
+
+                callback.onStep(this);
+
+                // Add data to the agent's buffer
+                agentBuffers[index].add(
+                    this.lastObservation[index],
+                    action,
+                    rewards[index],
+                    value,
+                    logprobability
+                );
+
+                // Update the last observation for the current agent
+                this.lastObservation[index] = newObservations[index];
+
+                // Finish trajectories and reset the environment if any agent is done or buffer is full
+                if (dones.some(done => done) || this.buffer.pointer > this.config.nSteps - 1) {
+                    for (let index = 0; index < agentData.length; index++) {
+                        const lastValue = dones[index] ? 0 : tf.tidy(() => this.critic.predict(tf.tensor([this.lastObservation[index]])).arraySync())[0][0];
+                        agentBuffers[index].finishTrajectory(lastValue);
+                    }
+                    numEpisodes += 1;
+                    this.lastObservation = await this.env.reset();
+                }
+
+
             }
-            allClippedActions.push(clippedAction)
+        }
 
-            // Take action in environment
-            const [newObservation, reward, done] = await this.env.step(clippedAction)
-            sumReturn += reward
-            sumLength += 1
+        // Combine agent buffers into the main buffer
+        agentBuffers.forEach(agentBuffer => {
+            this.buffer.merge(agentBuffer)
+        })
 
-            // Update global timestep counter
-            this.numTimesteps += 1 
-
-            callback.onStep(this)
-
-            this.buffer.add(
-                this.lastObservation, 
-                action, 
-                reward, 
-                value, 
-                logprobability
-            )
-            
-            this.lastObservation = newObservation
-            
-            if (done || this.buffer.pointer > this.config.nSteps - 1) {
-                const lastValue = done 
-                    ? 0 
-                    : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0]
-                this.buffer.finishTrajectory(lastValue)
-                numEpisodes += 1
-                break;
-                //this.lastObservation = this.env.reset()
-            }
-        }           
         callback.onRolloutEnd(this)
     }
-
     async train(config) {
         // Get values from the buffer
         const [
@@ -502,7 +515,7 @@ class PPO {
             tf.tensor(advantageBuffer),
             tf.tensor(returnBuffer).reshape([-1, 1]),
             tf.tensor(logprobabilityBuffer)
-        ])       
+        ])
         for (let i = 0; i < this.config.nEpochs; i++) {
             const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT)
             if (kl > 1.5 * this.config.targetKL) {
@@ -510,12 +523,12 @@ class PPO {
             }
         }
 
-        for (let i = 0;  i < this.config.nEpochs; i++) {
+        for (let i = 0; i < this.config.nEpochs; i++) {
             this.trainValue(observationBufferT, returnBufferT)
         }
 
         tf.dispose([
-            observationBufferT, 
+            observationBufferT,
             actionBufferT,
             advantageBufferT,
             returnBufferT,
@@ -529,16 +542,16 @@ class PPO {
             'logInterval': 1,
             'callback': null
         }
-        let { 
+        let {
             totalTimesteps,
             logInterval,
             callback
         } = Object.assign({}, learnConfigDefault, learnConfig)
 
         callback = this._initCallback(callback)
-        
+
         let iteration = 0
-        
+
         callback.onTrainingStart(this)
 
         while (this.numTimesteps < totalTimesteps) {
@@ -549,7 +562,7 @@ class PPO {
             }
             this.train()
         }
-        
+
         callback.onTrainingEnd(this)
     }
 }
