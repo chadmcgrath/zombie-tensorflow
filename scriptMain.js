@@ -1,4 +1,3 @@
-
 /* global $ */
 /* global Chart */
 /* global PPO */
@@ -79,8 +78,8 @@ const configPpo = {
     clipRatio: 0.2,              //.2- PPO clipping ratio for the objective function
     targetKL: 0.02,            // .01-Target KL divergence for early stopping during policy optimization
     netArch: {
-        'pi': [numInputs, numInputs],           // Network architecture for the policy network
-        'vf': [numInputs, numInputs]           // Network architecture for the value network
+        'pi': [numInputs, numInputs/2],           // Network architecture for the policy network
+        'vf': [numInputs, numInputs/2]           // Network architecture for the value network
     },
     activation: 'elu',          //relu, elu Activation function to be used in both policy and value networks
     verbose: 0                 // cm-does this do anything? - Verbosity level (0 for no logging, 1 for logging)
@@ -208,25 +207,25 @@ Agent.prototype.getVision = function () {
         // clip whether it cares about walls that are far away
         // if (type === -.1 && sr > 100)
         //     type = 0;
-        // we really shouldn't be doing this here, but it's a quick way to get the reward
-        if (ei === 0) {
-            if (e.sensed_type === 1)
-                this.rewardSignal = this.rewardSignal + blockedVisionHuman;
+        if (ei === 0) {           
             if (e.sensed_type === -.1)
                 this.rewardSignal = this.rewardSignal + (blockedVisionWall * (1 - e.sensed_proximity / (e.max_range / 2)));
+            else if (e.sensed_type === 1)
+                this.rewardSignal = this.rewardSignal + blockedVisionHuman;
+            
         }
         else if (e.sensed_type === -1 && e.sensed_proximity < closestZombieRange) {
             closestZombieRange = e.sensed_proximity;
         }
         // add to state for ML
         // tensorflow inputs
-        // we may only need distance here, and let the nn figure out the rest
+        // we may only need distance here, and let the nn figure out the angles
         // based on which eye sense the object
         eyeStates.push(e.sensed_proximity/e.max_range, type);
         //eyeStates.push(sr * currentEyeAnglePointing.x / e.max_range, sr * currentEyeAnglePointing.y / e.max_range, type);
     }
-    // we really shouldn't be doing this here, but it's a quick way to get the reward
-    this.rewardSignal = this.rewardSignal + zombieProximityReward * (1 - e.sensed_proximity / e.max_range);
+    // we really shouldn't be doing this here in this function, but it's a quick way to get the reward
+    this.rewardSignal = this.rewardSignal + zombieProximityReward * (1 -  closestZombieRange  / e.max_range);
 
     // tensorflow inputs
     return eyeStates;
@@ -397,7 +396,7 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
         if (actionSelected < numAngles) {
             newAngle = (actionSelected - (Math.floor(numAngles / 2))) * (2 * Math.PI / this.eyes.length);
         } else if (actionSelected === (numActions - 2)) {
-            newAngle = Math.PI;
+            this.moveFactor = 0;
         }
         else {
             this.moveFactor = 0;

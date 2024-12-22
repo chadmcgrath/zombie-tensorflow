@@ -27,7 +27,7 @@ const rewardConfigs={
         blockedVisionHuman: 0,
         blockedVisionWall: -.5,
         farVisionReward: 0,
-        zombieProximityReward: -.2
+        zombieProximityReward: -.1
     },
     attack: {
         baseReward: 1,
@@ -41,6 +41,6 @@ const rewardConfigs={
         blockedVisionHuman: -.5,
         blockedVisionWall: -.2,
         farVisionReward: .2,
-        zombieProximityReward: -.25
+        zombieProximityReward: -.1
     }
 }
