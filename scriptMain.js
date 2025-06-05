@@ -7,6 +7,7 @@
 //tf.enableDebugMode();//
 tf.setBackend('cpu');
 
+// Constants and Global Variables
 let zCnt = 0;
 let hCnt = 0;
 let agents = [];
@@ -66,9 +67,9 @@ let isSprites = true;
 let showEyes = 0;
 const eyeMaxRange = 1000;
 let gameSpeed = 4;
-let skipFrames =0;
+let skipFrames = 0;
 
-let batchSize = 512;//+$('#slider-batch').val();
+let batchSize = 512; //+$('#slider-batch').val();
 const learningRate = .001;
 const configPpo = {
     nSteps: batchSize,                 // Number of steps to collect rollouts
@@ -105,15 +106,15 @@ for (let i = 0; i < 3; i++) {  // Replace 10 with the number of images you have
     survivorShootFrames[i].src = `img/survivor/survivor-shoot_rifle_${i}.png`;  // Adjust the path and filename as needed
 }
 
-
+// Classes
 //karpathy's eye
 var Eye = function (angle) {
     this.angle = angle; // angle relative to agent its on
     this.max_range = eyeMaxRange;
     this.sensed_proximity = eyeMaxRange;
     this.sensed_type = 0; // what does the eye see?
-
 }
+
 function Agent(config) {
     this.id = config.id;
     this.experiences = [];
@@ -158,7 +159,6 @@ function Agent(config) {
 }
 
 Agent.prototype.getVision = function () {
-
     let eyeStates = [];
     var a = this;
     a.target = null;
@@ -601,6 +601,7 @@ function drawRotatedImage(ctx, image, x, y, width, height, angle) {
     ctx.restore();
 }
 
+// Main Functions
 async function mainLoop(time, action, agentExperienceResult) {
     if (!time) {
         time = Date.now();
@@ -898,6 +899,8 @@ async function addUnit(config, isLearning=false) {
 let maxId = 0;
 let ppo = null;
 let isVampire = false;
+
+// Event Listeners
 window.addEventListener('keydown', (event) => {
     if (event.code === 'Space') {
         continueLoop = !continueLoop;
@@ -1041,6 +1044,8 @@ $('#show-eyes').on('input', function () {
 $('#skip-frames').on('input', function () {
     skipFrames = +$(this).val();
 });
+
+// Initialization
 (async function () {
 
     // Fill in the form with current values
@@ -1131,4 +1136,3 @@ $('#skip-frames').on('input', function () {
 })();
 
 //assets - zombies and survivors : https://opengameart.org/content/animated-top-down-zombie
-
