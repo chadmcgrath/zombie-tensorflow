@@ -1,7 +1,7 @@
 /* global $ */
 /* global Chart */
 /* global PPO */
-/* global pi2, randomAngle, fixAngle, Vec, stuff_collide, rewardConfigs */
+/* global pi2, randomAngle, fixAngle, Vec, stuff_collide, rewardConfigs, createGrid */
 
 /* global tf */
 //tf.enableDebugMode();//
@@ -314,7 +314,8 @@ Agent.prototype.zombify = async function (victim, zombie) {
 }
 
 Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
-    this.moveFactor = this.isShot ? .1 : 1;
+    // Modernized: Use const where possible, split into sub-functions for clarity
+    this.moveFactor = this.isShot ? 0.1 : 1;
 
     if (this.isZ) {
         let inMelee = false;
@@ -420,15 +421,9 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
     }
     this.nextTimer -= clock.delta;
 
-    var speed = this.moveFactor * (this.speed) * 10;
     this.isShot = false;
     this.isBit = false;
-    // get velociy
-    var vx = this.dir.x * speed * clock.delta;
-    var vy = this.dir.y * speed * clock.delta;
-    // move
-    this.pos.x += vx;
-    this.pos.y += vy;
+    this.move(clock);
     // prevent walking through blocks
     for (let i = 0, l = blocks.length; i < l; i++) {
         this.intersect = blocks[i].rayIntersect(this.pos, this.dir)
@@ -470,6 +465,15 @@ Agent.prototype.logic = async function (clock, action, agentExperienceResult) {
         return ret;
     }
 }
+
+Agent.prototype.move = function (clock) {
+    const speed = this.moveFactor * this.speed * 10;
+    const vx = this.dir.x * speed * clock.delta;
+    const vy = this.dir.y * speed * clock.delta;
+    this.pos.x += vx;
+    this.pos.y += vy;
+}
+
 Agent.prototype.CheckScreenBounds = function () {
     var bound = false;
     if (this.pos.x < 0) {
@@ -658,7 +662,7 @@ async function mainLoop(time, action, agentExperienceResult) {
             // these are the other humans. they use the best action, rather than the proximal action
             const states = [...(humans[i].states && humans[i].states.length > 0) ? humans[i].states : await humans[i].getStates()];
 
-            const [preds, actionProximal, value, logprobability] = await ppo.getSample(states);
+const [preds, , value, logprobability] = await ppo.getSample(states);
             humans[i].isLearning = false;
             const action = tf.argMax(preds).dataSync()[0];
             const rets = await humans[i].logic(clock, action);
@@ -978,19 +982,6 @@ const saveToFiles = async () => {
     await ppo.actor.save('downloads://actor-' + name);
     await ppo.critic.save('downloads://critic-' + name);
 }
-const loadModelFiles = async () => {
-    const actorInput = document.getElementById('actorInput');
-    const criticInput = document.getElementById('criticInput');
-
-    const actorFile = actorInput.files[0];
-    const criticFile = criticInput.files[0];
-
-    const actorUrl = URL.createObjectURL(actorFile);
-    const criticUrl = URL.createObjectURL(criticFile);
-
-    ppo.actor = await tf.loadLayersModel(actorUrl);
-    ppo.critic = await tf.loadLayersModel(criticUrl);
-}
 var rewardModal = $('#rewardModal');
 
     $('#openRewardModal').click(function() {
@@ -1064,7 +1055,6 @@ $('#skip-frames').on('input', function () {
     // eslint-disable-next-line no-unused-vars
     const windowArea = $(window).width() * $(window).height();
 
-    const blockNum = windowArea / 50000;
     const squares = createGrid(ctx, 20, 100, 50, 100, 70);
     for (const s of squares) {
         blocks.push(s);
@@ -1082,30 +1072,7 @@ $('#skip-frames').on('input', function () {
     // }
     // blocks.push(new Square(zombieHouseConfig, ctx));
     // not sure how the height works for drawing the square but I'll wing it
-    const riverConfig1 = {
-        fill: "blue",
-        stroke: 'navy',
-
-        pos: {
-            x: (ctx.canvas.width / 2),
-            y: 0,
-        },
-        width: ctx.canvas.width / 50,
-        height: ctx.canvas.height - 10,
-    }
-    const riverConfig2 = {
-        fill: "blue",
-        stroke: 'navy',
-
-        pos: {
-            x: (ctx.canvas.width / 2),
-            y: ctx.canvas.height + 10,
-        },
-        width: ctx.canvas.width / 50,
-        height: ctx.canvas.height,
-    }
-    //blocks.push(new Square(riverConfig1));
-    //blocks.push(new Square(riverConfig2));
+    // Removed unused riverConfig1 and riverConfig2
     const maxAgents = 53;//windowArea / 10000;
     const numHumans = 50;
     for (let i = 0, l = maxAgents; i < l; i++) {
