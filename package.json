@@ -1,10 +1,30 @@
 {
 	"name": "tf-zombies",
 	"version": "1.0.0",
-	"description": "",
+	"description": "AI Zombie Apocalypse Simulator - Watch humans learn to survive using reinforcement learning (PPO) with TensorFlow.js",
 	"main": "main.js",
 	"scripts": {
-		 "start": "electron --max-old-space-size=4096 main.js"
+		"start": "electron --max-old-space-size=4096 main.js",
+		"dev": "electron --max-old-space-size=4096 main.js",
+		"install-deps": "npm install",
+		"lint": "eslint *.js",
+		"clean": "rm -rf node_modules package-lock.json && npm install"
+	},
+	"keywords": [
+		"tensorflow",
+		"reinforcement-learning",
+		"ppo",
+		"zombie",
+		"ai",
+		"simulation",
+		"electron",
+		"game"
+	],
+	"author": "",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": ""
 	},
 	"dependencies": {
 		"electron": "^30.0.2"
@@ -13,5 +33,9 @@
 		"@eslint/js": "^9.4.0",
 		"eslint": "^9.4.0",
 		"globals": "^15.4.0"
+	},
+	"engines": {
+		"node": ">=16.0.0",
+		"npm": ">=8.0.0"
 	}
 }
