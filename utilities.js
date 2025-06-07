@@ -1,4 +1,6 @@
 /* eslint-disable no-unused-vars */
+/* global Chart */
+/* global tf */
 const pi2 = Math.PI * 2;
 var EPS = 0.01;
 
@@ -311,4 +313,115 @@ const stuff_collide = (agent, p2, blocks, check_walls, check_items) => {
     }
 
     return minres;
+}
+
+// Image loading utilities
+function loadImageFrames(basePath, count, prefix = '') {
+    const frames = [];
+    for (let i = 0; i < count; i++) {
+        frames[i] = new Image();
+        frames[i].src = `${basePath}/${prefix}${i}.png`;
+    }
+    return frames;
+}
+
+// Animation utilities
+function drawRotatedImage(ctx, image, x, y, width, height, angle) {
+    ctx.save();
+    ctx.translate(x + width / 2, y + height / 2);
+    ctx.rotate(angle);
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+    ctx.restore();
+}
+
+// Async utilities
+function requestAnimationFrameAsync(func) {
+    return new Promise((resolve) => {
+        requestAnimationFrame((time) => {
+            resolve(func(time));
+        });
+    });
+}
+
+// Chart utilities
+function createOrUpdateChart(chartInstance, ctx, data, labels, chartConfig) {
+    if (!chartInstance) {
+        return new Chart(ctx, {
+            type: chartConfig.type || 'line',
+            data: {
+                labels: labels,
+                datasets: chartConfig.datasets
+            },
+            options: chartConfig.options || {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    } else {
+        chartInstance.data.labels = labels;
+        chartInstance.data.datasets.forEach((dataset, index) => {
+            if (chartConfig.datasets[index]) {
+                dataset.data = chartConfig.datasets[index].data;
+            }
+        });
+        chartInstance.update();
+        return chartInstance;
+    }
+}
+
+// Model persistence utilities
+const ModelPersistence = {
+    async save(actor, critic, name = 'zed-tf') {
+        await actor.save(`indexeddb://actor-${name}`);
+        await critic.save(`indexeddb://critic-${name}`);
+        console.log(`Models saved to IndexedDB: ${name}`);
+        return this.saveToFiles(actor, critic, name);
+    },
+
+    async load(name = 'zed-tf') {
+        const actor = await tf.loadLayersModel(`indexeddb://actor-${name}`);
+        const critic = await tf.loadLayersModel(`indexeddb://critic-${name}`);
+        return { actor, critic };
+    },
+
+    async saveToFiles(actor, critic, name = 'zed-tf') {
+        await actor.save(`downloads://actor-${name}`);
+        await critic.save(`downloads://critic-${name}`);
+    }
+};
+
+// Game state utilities
+const GameState = {
+    createClock() {
+        return {
+            total: 0,
+            start: 0,
+            time: 0,
+            delta: 0
+        };
+    },
+
+    updateClock(clock, time, gameSpeed = 1) {
+        if (!time) time = Date.now();
+        if (!clock.start) clock.start = time;
+        if (clock.time) clock.delta = (time - clock.time) / 1000.0;
+        clock.time = time;
+        if (clock.delta > 0.1) clock.delta = 0.1;
+        if (clock.delta < 0.01) clock.delta = 0.01;
+        clock.delta *= gameSpeed;
+        return clock;
+    }
+};
+
+// Eye class for vision system
+class Eye {
+    constructor(angle) {
+        this.angle = angle;
+        this.max_range = 1000; // eyeMaxRange constant
+        this.sensed_proximity = this.max_range;
+        this.sensed_type = 0;
+    }
 }
