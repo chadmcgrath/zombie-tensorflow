@@ -136,6 +136,19 @@ zombie-tensorflow/
    - The application uses `--max-old-space-size=4096` to allocate more memory
    - Close other applications to free up system resources
 
+### Testing Commands
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (re-runs on file changes)
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
 ### Additional Commands
 
 ```bash
@@ -149,6 +162,53 @@ npm run lint
 npm run install-deps
 ```
 
+## Testing
+
+This project includes comprehensive unit tests for the core mathematical and utility functions. The test suite covers:
+
+### What's Tested
+
+- **Vector Mathematics**: 2D vector operations, distance calculations, rotations, and normalizations
+- **Collision Detection**: Line intersections, ray-casting, and geometric collision algorithms
+- **Game Physics**: Square/rectangle collision detection and response
+- **Reward Configurations**: Validation of all reward parameter sets and their consistency
+- **Utility Functions**: Image loading, animation helpers, and async utilities
+- **Game State Management**: Clock systems, timing, and state updates
+- **Integration Tests**: Cross-component functionality and system integration
+
+### Test Coverage
+
+The tests focus on the mathematical and algorithmic components that are:
+- **Deterministic**: Functions with predictable outputs
+- **Pure Functions**: No side effects or external dependencies
+- **Core Logic**: Critical game mechanics and calculations
+- **Configuration Validation**: Ensuring reward systems are properly configured
+
+### Running Tests
+
+```bash
+# Run all tests once
+npm test
+
+# Watch mode - automatically re-run tests when files change
+npm run test:watch
+
+# Generate coverage report
+npm run test:coverage
+```
+
+### Test Structure
+
+```
+tests/
+├── setup.js           # Test environment configuration
+├── utilities.test.js  # Vector math, collision detection, utilities
+├── config.test.js     # Reward configuration validation
+└── integration.test.js # Cross-component integration tests
+```
+
+The test suite uses Jest with jsdom environment to simulate browser APIs while testing the core logic in isolation.
+
 ## Technologies Used
 
 - **Electron**: Desktop application framework
@@ -157,6 +217,7 @@ npm run install-deps
 - **HTML5 Canvas**: Graphics rendering
 - **Chart.js**: Data visualization
 - **Bootstrap**: UI framework
+- **Jest**: Testing framework with comprehensive unit and integration tests
 
 ## Credits
 

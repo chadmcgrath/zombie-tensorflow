@@ -6,6 +6,9 @@
 	"scripts": {
 		"start": "electron --max-old-space-size=4096 main.js",
 		"dev": "electron --max-old-space-size=4096 main.js",
+		"test": "jest",
+		"test:watch": "jest --watch",
+		"test:coverage": "jest --coverage",
 		"install-deps": "npm install",
 		"lint": "eslint *.js",
 		"clean": "rm -rf node_modules package-lock.json && npm install"
@@ -32,7 +35,13 @@
 	"devDependencies": {
 		"@eslint/js": "^9.4.0",
 		"eslint": "^9.4.0",
-		"globals": "^15.4.0"
+		"globals": "^15.4.0",
+		"jest": "^29.7.0",
+		"jest-environment-jsdom": "^29.7.0",
+		"canvas": "^2.11.2",
+		"@babel/core": "^7.23.0",
+		"@babel/preset-env": "^7.23.0",
+		"babel-jest": "^29.7.0"
 	},
 	"engines": {
 		"node": ">=16.0.0",

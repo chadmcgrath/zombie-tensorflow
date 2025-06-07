@@ -217,7 +217,7 @@ class Agent {
         return eyeStates;
     }
 
-    drawEyeVision(eye, currentEyeAnglePointing, eyeIndex) {
+    drawEyeVision(eye, currentEyeAnglePointing) {
         gameState.ctx.strokeStyle = "rgb(0,0,0,0)";
         
         if (gameState.showEyes > 1) {
