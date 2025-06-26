@@ -4,9 +4,8 @@
 	"description": "AI Zombie Apocalypse Simulator - Watch humans learn to survive using reinforcement learning (PPO) with TensorFlow.js",
 	"main": "main.js",
 	"scripts": {
-		"build": "tsc",
-		"start": "npm run build && electron --max-old-space-size=4096 main.js",
-		"dev": "npm run build && electron --max-old-space-size=4096 main.js",
+		"start": "electron --max-old-space-size=4096 main.js",
+		"dev": "electron --max-old-space-size=4096 main.js",
 		"test": "jest",
 		"test:watch": "jest --watch",
 		"test:coverage": "jest --coverage",
