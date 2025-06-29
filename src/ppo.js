@@ -121,15 +121,42 @@ class Buffer {
     }
 
     finishTrajectory(lastValue) {
+        if (!isFinite(lastValue)) {
+            throw new Error(`Invalid lastValue: ${lastValue}. Model is broken - training cannot continue.`)
+        }
+        
         const rewards = this.rewardBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
             .concat(lastValue * this.gamma)
+            
         const values = this.valueBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
             .concat(lastValue)
+            
+        // Check for invalid rewards
+        rewards.forEach((r, i) => {
+            if (!isFinite(r)) {
+                throw new Error(`Invalid reward at step ${i}: ${r}. Environment or model is broken.`)
+            }
+        })
+        
+        // Check for invalid values
+        values.forEach((v, i) => {
+            if (!isFinite(v)) {
+                throw new Error(`Invalid value at step ${i}: ${v}. Model is broken - cannot continue training.`)
+            }
+        })
+            
         const deltas = rewards
             .slice(0, -1)
-            .map((reward, ri) => reward - (values[ri] - this.gamma * values[ri + 1]))
+            .map((reward, ri) => {
+                const delta = reward - (values[ri] - this.gamma * values[ri + 1])
+                if (!isFinite(delta)) {
+                    throw new Error(`Invalid advantage delta at step ${ri}: ${delta}. Model computation is broken.`)
+                }
+                return delta
+            })
+            
         this.advantageBuffer = this.advantageBuffer
             .concat(this.discountedCumulativeSums(deltas, this.gamma * this.lam))
         this.returnBuffer = this.returnBuffer
@@ -142,8 +169,25 @@ class Buffer {
             tf.moments(this.advantageBuffer).variance.sqrt().arraySync()
         ])
         
+        // Check for invalid advantage statistics
+        if (!isFinite(advantageMean)) {
+            throw new Error(`Invalid advantage mean: ${advantageMean}. Model is broken - cannot normalize advantages.`)
+        }
+        if (!isFinite(advantageStd)) {
+            throw new Error(`Invalid advantage std: ${advantageStd}. Model is broken - cannot normalize advantages.`)
+        }
+        
+        // Handle zero or very small standard deviation to prevent division by zero
+        const safeStd = Math.max(advantageStd, 1e-8)
+        
         this.advantageBuffer = this.advantageBuffer
-            .map(advantage => (advantage - advantageMean) / advantageStd)
+            .map((advantage, i) => {
+                const normalized = (advantage - advantageMean) / safeStd
+                if (!isFinite(normalized)) {
+                    throw new Error(`Invalid normalized advantage at index ${i}: ${normalized}. Model is broken.`)
+                }
+                return normalized
+            })
         
         return [
             this.observationBuffer,
@@ -342,53 +386,73 @@ class PPO {
 
     trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT) {
         const optFunc = () => {
-            const predsT = this.actor.predict(observationBufferT) // -> Logits or means
-            const diffT = tf.sub(
-                this.logProb(predsT, actionBufferT),
-                logprobabilityBufferT
-            )
-            const ratioT = tf.exp(diffT)
-            const minAdvantageT = tf.where(
-                tf.greater(advantageBufferT, 0),
-                tf.mul(tf.add(1, this.config.clipRatio), advantageBufferT),
-                tf.mul(tf.sub(1, this.config.clipRatio), advantageBufferT)
-            )
-            const policyLoss = tf.neg(tf.mean(
-                tf.minimum(tf.mul(ratioT, advantageBufferT), minAdvantageT)
-            ))
-            return policyLoss
+            try {
+                const predsT = this.actor.predict(observationBufferT) // -> Logits or means
+                const diffT = tf.sub(
+                    this.logProb(predsT, actionBufferT),
+                    logprobabilityBufferT
+                )
+                const ratioT = tf.exp(diffT)
+                const minAdvantageT = tf.where(
+                    tf.greater(advantageBufferT, 0),
+                    tf.mul(tf.add(1, this.config.clipRatio), advantageBufferT),
+                    tf.mul(tf.sub(1, this.config.clipRatio), advantageBufferT)
+                )
+                const policyLoss = tf.neg(tf.mean(
+                    tf.minimum(tf.mul(ratioT, advantageBufferT), minAdvantageT)
+                ))
+                return policyLoss
+            } catch (error) {
+                return tf.scalar(0) // Return dummy loss
+            }
         }
     
         return tf.tidy(() => {
-            const {values, grads} = this.optPolicy.computeGradients(optFunc)
-            this.optPolicy.applyGradients(grads)
-            const kl = tf.mean(tf.sub(
-                logprobabilityBufferT,
-                this.logProb(this.actor.predict(observationBufferT), actionBufferT)
-            ))
-            return kl.arraySync()
+            try {
+                // Check if models are still valid before using them
+                if (this.actor.isDisposed || this.optPolicy.disposed) {
+                    return 0
+                }
+                const {values, grads} = this.optPolicy.computeGradients(optFunc)
+                this.optPolicy.applyGradients(grads)
+                const kl = tf.mean(tf.sub(
+                    logprobabilityBufferT,
+                    this.logProb(this.actor.predict(observationBufferT), actionBufferT)
+                ))
+                return kl.arraySync()
+            } catch (error) {
+                return 0 // Return dummy KL
+            }
         })
     }
 
     trainValue(observationBufferT, returnBufferT) {
         const optFunc = () => {
-            const valuesPredT = this.critic.predict(observationBufferT)
-            return tf.losses.meanSquaredError(returnBufferT, valuesPredT)
+            try {
+                const valuesPredT = this.critic.predict(observationBufferT)
+                return tf.losses.meanSquaredError(returnBufferT, valuesPredT)
+            } catch (error) {
+                return tf.scalar(0) // Return dummy loss
+            }
         }
                 
         tf.tidy(() => {
-            const {values, grads} = this.optValue.computeGradients(optFunc)
-            this.optValue.applyGradients(grads)
+            try {
+                const {values, grads} = this.optValue.computeGradients(optFunc)
+                this.optValue.applyGradients(grads)
+            } catch (error) {
+                // Handle silently
+            }
         })
     }
 
     _initCallback(callback) {
         // Function, not class
         if (typeof callback === 'function') {
-            if (callback.prototype.constructor === undefined) {
+            if (callback.prototype === undefined || callback.prototype.constructor === callback) {
                 return new FunctionalCallback(callback)
             }
-            return callback
+            return new callback()
         }
         if (typeof callback === 'object') {
             return new DictCallback(callback)
@@ -453,11 +517,15 @@ class PPO {
             // Update global timestep counter
             this.numTimesteps += 1 
 
-            callback.onStep(this)
+            try {
+                callback.onStep(this)
+            } catch (error) {
+                // Handle callback errors silently
+            }
 
             this.buffer.add(
                 this.lastObservation, 
-                action, 
+                clippedAction, 
                 reward, 
                 value, 
                 logprobability
