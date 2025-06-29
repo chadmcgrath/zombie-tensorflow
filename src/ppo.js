@@ -102,18 +102,34 @@ export class Buffer {
     }
 
     add(observation, action, reward, value, logprobability) {
+        // Validate and sanitize inputs
+        const sanitizedReward = this._sanitizeValue(reward);
+        const sanitizedValue = this._sanitizeValue(value);
+        const sanitizedLogprob = this._sanitizeValue(logprobability);
+        
         this.observationBuffer.push(observation.slice(0))
         this.actionBuffer.push(action)
-        this.rewardBuffer.push(reward)
-        this.valueBuffer.push(value)
-        this.logprobabilityBuffer.push(logprobability)
+        this.rewardBuffer.push(sanitizedReward)
+        this.valueBuffer.push(sanitizedValue)
+        this.logprobabilityBuffer.push(sanitizedLogprob)
         this.pointer += 1
+    }
+
+    _sanitizeValue(value) {
+        // Handle NaN, Infinity, and extreme values
+        if (!isFinite(value) || isNaN(value)) {
+            return 0.0;
+        }
+        // Clamp extreme values
+        return Math.max(-1000, Math.min(1000, value));
     }
 
     discountedCumulativeSums (arr, coeff) {
         let res = []
         let s = 0
-        arr.reverse().forEach(v => {
+        // Create a copy to avoid mutating the original array
+        const arrCopy = [...arr];
+        arrCopy.reverse().forEach(v => {
             s = v + s * coeff
             res.push(s)
         })
@@ -121,12 +137,20 @@ export class Buffer {
     }
 
     finishTrajectory(lastValue) {
+        if (this.pointer === this.trajectoryStartIndex) {
+            // Handle empty trajectory
+            this.trajectoryStartIndex = this.pointer;
+            return;
+        }
+
+        const sanitizedLastValue = this._sanitizeValue(lastValue);
+        
         const rewards = this.rewardBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
-            .concat(lastValue * this.gamma)
+            .concat(sanitizedLastValue * this.gamma)
         const values = this.valueBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
-            .concat(lastValue)
+            .concat(sanitizedLastValue)
         const deltas = rewards
             .slice(0, -1)
             .map((reward, ri) => reward - (values[ri] - this.gamma * values[ri + 1]))
@@ -134,16 +158,35 @@ export class Buffer {
             .concat(this.discountedCumulativeSums(deltas, this.gamma * this.lam))
         this.returnBuffer = this.returnBuffer
             .concat(this.discountedCumulativeSums(rewards, this.gamma).slice(0, -1))
+        
+        this.trajectoryStartIndex = this.pointer;
     }
 
     get() {
-        const [advantageMean, advantageStd] = tf.tidy(() => [
-            tf.mean(this.advantageBuffer).arraySync(),
-            tf.moments(this.advantageBuffer).variance.sqrt().arraySync()
-        ])
+        if (this.advantageBuffer.length === 0) {
+            // Handle empty buffer
+            return [
+                this.observationBuffer,
+                this.actionBuffer,
+                [],
+                [],
+                this.logprobabilityBuffer,
+                this.pointer,
+            ];
+        }
+
+        const [advantageMean, advantageStd] = tf.tidy(() => {
+            const advTensor = tf.tensor(this.advantageBuffer);
+            const mean = tf.mean(advTensor).arraySync();
+            const std = tf.moments(advTensor).variance.sqrt().arraySync();
+            return [mean, Math.max(std, 1e-8)]; // Prevent division by zero
+        });
         
         this.advantageBuffer = this.advantageBuffer
-            .map(advantage => (advantage - advantageMean) / advantageStd)
+            .map(advantage => {
+                const normalized = (advantage - advantageMean) / advantageStd;
+                return this._sanitizeValue(normalized);
+            });
         
         return [
             this.observationBuffer,
@@ -347,7 +390,7 @@ export class PPO {
                 this.logProb(predsT, actionBufferT),
                 logprobabilityBufferT
             )
-            const ratioT = tf.exp(diffT)
+            const ratioT = tf.exp(tf.clipByValue(diffT, -10, 10)) // Prevent extreme ratios
             const minAdvantageT = tf.where(
                 tf.greater(advantageBufferT, 0),
                 tf.mul(tf.add(1, this.config.clipRatio), advantageBufferT),
@@ -360,13 +403,24 @@ export class PPO {
         }
     
         return tf.tidy(() => {
-            const {values, grads} = this.optPolicy.computeGradients(optFunc)
-            this.optPolicy.applyGradients(grads)
-            const kl = tf.mean(tf.sub(
-                logprobabilityBufferT,
-                this.logProb(this.actor.predict(observationBufferT), actionBufferT)
-            ))
-            return kl.arraySync()
+            try {
+                const {values, grads} = this.optPolicy.computeGradients(optFunc)
+                
+                // Check if gradients are valid
+                const hasValidGrads = grads && Object.keys(grads).length > 0;
+                if (hasValidGrads) {
+                    this.optPolicy.applyGradients(grads)
+                }
+                
+                const kl = tf.mean(tf.sub(
+                    logprobabilityBufferT,
+                    this.logProb(this.actor.predict(observationBufferT), actionBufferT)
+                ))
+                return Math.abs(kl.arraySync()) // Return absolute KL for stability
+            } catch (error) {
+                console.warn('Policy training step failed:', error.message);
+                return 0; // Return 0 KL on error
+            }
         })
     }
 
@@ -383,16 +437,25 @@ export class PPO {
     }
 
     _initCallback(callback) {
+        // Handle null/undefined callbacks
+        if (!callback) {
+            return new BaseCallback();
+        }
+        
         // Function, not class
         if (typeof callback === 'function') {
-            if (callback.prototype.constructor === undefined) {
+            // Check if it's an arrow function or regular function without prototype
+            if (!callback.prototype || callback.prototype.constructor === undefined) {
                 return new FunctionalCallback(callback)
             }
             return callback
         }
+        
+        // Handle object callbacks
         if (typeof callback === 'object') {
             return new DictCallback(callback)
         }
+        
         return new BaseCallback() 
     }
     async getSample(lastObservation)
@@ -411,114 +474,160 @@ export class PPO {
         })
     }
     async collectRollouts(callback) {
-        if (this.lastObservation === null) {
-            this.lastObservation = this.env.reset()
-        }
+        try {
+            if (this.lastObservation === null) {
+                this.lastObservation = this.env.reset()
+            }
 
-        this.buffer.reset()
-        callback.onRolloutStart(this)
+            this.buffer.reset()
+            callback.onRolloutStart(this)
 
-        let sumReturn = 0
-        let sumLength = 0
-        let numEpisodes = 0
+            let sumReturn = 0
+            let sumLength = 0
+            let numEpisodes = 0
 
-        const allPreds = []
-        const allActions = []
-        const allClippedActions = []
+            const allPreds = []
+            const allActions = []
+            const allClippedActions = []
 
-        while(this.buffer.pointer < this.config.nSteps){
-            // Predict action, value and logprob from last observation
-            const [preds, action, value, logprobability] = await this.getSample(this.lastObservation); 
-            allPreds.push(preds)
-            allActions.push(action)
+            while(this.buffer.pointer < this.config.nSteps){
+                try {
+                    // Predict action, value and logprob from last observation
+                    const [preds, action, value, logprobability] = await this.getSample(this.lastObservation); 
+                    allPreds.push(preds)
+                    allActions.push(action)
 
-            // Rescale for continuous action space
-            let clippedAction = action
-            if (this.env.actionSpace.class == 'Box') {
-                let h = this.env.actionSpace.high
-                let l = this.env.actionSpace.low
-                if (typeof h === 'number' && typeof l === 'number') {
-                    clippedAction = action.map(a => {
-                        return Math.min(Math.max(a, l), h)
-                    })
+                    // Rescale for continuous action space
+                    let clippedAction = action
+                    if (this.env.actionSpace.class == 'Box') {
+                        let h = this.env.actionSpace.high
+                        let l = this.env.actionSpace.low
+                        if (typeof h === 'number' && typeof l === 'number') {
+                            clippedAction = Array.isArray(action) ? action.map(a => {
+                                return Math.min(Math.max(a, l), h)
+                            }) : Math.min(Math.max(action, l), h)
+                        }
+                    }
+                    allClippedActions.push(clippedAction)
+
+                    // Take action in environment
+                    const [newObservation, reward, done] = await this.env.step(clippedAction)
+                    sumReturn += reward
+                    sumLength += 1
+
+                    // Update global timestep counter
+                    this.numTimesteps += 1 
+
+                    // Handle callback errors gracefully
+                    try {
+                        callback.onStep(this)
+                    } catch (callbackError) {
+                        console.warn('Callback error during step:', callbackError.message);
+                        // Continue execution despite callback error
+                    }
+
+                    this.buffer.add(
+                        this.lastObservation, 
+                        clippedAction, // Store clipped action in buffer
+                        reward, 
+                        value, 
+                        logprobability
+                    )
+                    
+                    this.lastObservation = newObservation
+                    
+                    if (done || this.buffer.pointer > this.config.nSteps - 1) {
+                        const lastValue = done 
+                            ? 0 
+                            : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0]
+                        this.buffer.finishTrajectory(lastValue)
+                        numEpisodes += 1
+                        break;
+                        //this.lastObservation = this.env.reset()
+                    }
+                } catch (stepError) {
+                    console.warn('Error during rollout step:', stepError.message);
+                    // Break out of the loop on step error
+                    break;
                 }
-            }
-            allClippedActions.push(clippedAction)
-
-            // Take action in environment
-            const [newObservation, reward, done] = await this.env.step(clippedAction)
-            sumReturn += reward
-            sumLength += 1
-
-            // Update global timestep counter
-            this.numTimesteps += 1 
-
-            callback.onStep(this)
-
-            this.buffer.add(
-                this.lastObservation, 
-                action, 
-                reward, 
-                value, 
-                logprobability
-            )
+            }           
             
-            this.lastObservation = newObservation
-            
-            if (done || this.buffer.pointer > this.config.nSteps - 1) {
-                const lastValue = done 
-                    ? 0 
-                    : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0]
-                this.buffer.finishTrajectory(lastValue)
-                numEpisodes += 1
-                break;
-                //this.lastObservation = this.env.reset()
+            try {
+                callback.onRolloutEnd(this)
+            } catch (callbackError) {
+                console.warn('Callback error during rollout end:', callbackError.message);
             }
-        }           
-        callback.onRolloutEnd(this)
+        } catch (error) {
+            console.warn('Error during collectRollouts:', error.message);
+            throw error;
+        }
     }
 
     async train(config) {
-        // Get values from the buffer
-        const [
-            observationBuffer,
-            actionBuffer,
-            advantageBuffer,
-            returnBuffer,
-            logprobabilityBuffer,
-        ] = this.buffer.get()
+        try {
+            // Get values from the buffer
+            const [
+                observationBuffer,
+                actionBuffer,
+                advantageBuffer,
+                returnBuffer,
+                logprobabilityBuffer,
+            ] = this.buffer.get()
 
-        const [
-            observationBufferT,
-            actionBufferT,
-            advantageBufferT,
-            returnBufferT,
-            logprobabilityBufferT
-        ] = tf.tidy(() => [
-            tf.tensor(observationBuffer),
-            tf.tensor(actionBuffer, null, this.env.actionSpace.dtype),
-            tf.tensor(advantageBuffer),
-            tf.tensor(returnBuffer).reshape([-1, 1]),
-            tf.tensor(logprobabilityBuffer)
-        ])       
-        for (let i = 0; i < this.config.nEpochs; i++) {
-            const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT)
-            if (kl > 1.5 * this.config.targetKL) {
-                break
+            // Skip training if no data
+            if (observationBuffer.length === 0 || advantageBuffer.length === 0) {
+                return;
             }
-        }
 
-        for (let i = 0;  i < this.config.nEpochs; i++) {
-            this.trainValue(observationBufferT, returnBufferT)
-        }
+            const [
+                observationBufferT,
+                actionBufferT,
+                advantageBufferT,
+                returnBufferT,
+                logprobabilityBufferT
+            ] = tf.tidy(() => [
+                tf.tensor(observationBuffer),
+                tf.tensor(actionBuffer, null, this.env.actionSpace.dtype),
+                tf.tensor(advantageBuffer),
+                tf.tensor(returnBuffer).reshape([-1, 1]),
+                tf.tensor(logprobabilityBuffer)
+            ])       
+            
+            try {
+                for (let i = 0; i < this.config.nEpochs; i++) {
+                    try {
+                        const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT)
+                        if (kl > 1.5 * this.config.targetKL) {
+                            break
+                        }
+                    } catch (policyError) {
+                        console.warn('Policy training error:', policyError.message);
+                        break; // Stop policy training on error
+                    }
+                }
 
-        tf.dispose([
-            observationBufferT, 
-            actionBufferT,
-            advantageBufferT,
-            returnBufferT,
-            logprobabilityBufferT
-        ])
+                for (let i = 0;  i < this.config.nEpochs; i++) {
+                    try {
+                        this.trainValue(observationBufferT, returnBufferT)
+                    } catch (valueError) {
+                        console.warn('Value training error:', valueError.message);
+                        break; // Stop value training on error
+                    }
+                }
+            } finally {
+                // Always dispose tensors, even if training fails
+                tf.dispose([
+                    observationBufferT, 
+                    actionBufferT,
+                    advantageBufferT,
+                    returnBufferT,
+                    logprobabilityBufferT
+                ])
+            }
+        } catch (error) {
+            console.warn('Training error:', error.message);
+            // Don't rethrow to allow continued execution
+        }
     }
 
     async learn(learnConfig) {

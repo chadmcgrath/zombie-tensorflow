@@ -10,7 +10,7 @@ export default defineConfig({
     assetsDir: 'assets',
   },
   server: {
-    port: 3000,
+    port: 3001,
     strictPort: false,
   },
   test: {
