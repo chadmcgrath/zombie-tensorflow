@@ -386,63 +386,51 @@ class PPO {
 
     trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT) {
         const optFunc = () => {
-            try {
-                const predsT = this.actor.predict(observationBufferT) // -> Logits or means
-                const diffT = tf.sub(
-                    this.logProb(predsT, actionBufferT),
-                    logprobabilityBufferT
-                )
-                const ratioT = tf.exp(diffT)
-                const minAdvantageT = tf.where(
-                    tf.greater(advantageBufferT, 0),
-                    tf.mul(tf.add(1, this.config.clipRatio), advantageBufferT),
-                    tf.mul(tf.sub(1, this.config.clipRatio), advantageBufferT)
-                )
-                const policyLoss = tf.neg(tf.mean(
-                    tf.minimum(tf.mul(ratioT, advantageBufferT), minAdvantageT)
-                ))
-                return policyLoss
-            } catch (error) {
-                return tf.scalar(0) // Return dummy loss
-            }
+            const predsT = this.actor.predict(observationBufferT) // -> Logits or means
+            const diffT = tf.sub(
+                this.logProb(predsT, actionBufferT),
+                logprobabilityBufferT
+            )
+            const ratioT = tf.exp(diffT)
+            const minAdvantageT = tf.where(
+                tf.greater(advantageBufferT, 0),
+                tf.mul(tf.add(1, this.config.clipRatio), advantageBufferT),
+                tf.mul(tf.sub(1, this.config.clipRatio), advantageBufferT)
+            )
+            const policyLoss = tf.neg(tf.mean(
+                tf.minimum(tf.mul(ratioT, advantageBufferT), minAdvantageT)
+            ))
+            return policyLoss
         }
     
         return tf.tidy(() => {
-            try {
-                // Check if models are still valid before using them
-                if (this.actor.isDisposed || this.optPolicy.disposed) {
-                    return 0
-                }
-                const {values, grads} = this.optPolicy.computeGradients(optFunc)
-                this.optPolicy.applyGradients(grads)
-                const kl = tf.mean(tf.sub(
-                    logprobabilityBufferT,
-                    this.logProb(this.actor.predict(observationBufferT), actionBufferT)
-                ))
-                return kl.arraySync()
-            } catch (error) {
-                return 0 // Return dummy KL
+            // Check if models are still valid before using them
+            if (this.actor.isDisposed || this.optPolicy.disposed) {
+                throw new Error('Actor model or optimizer has been disposed - cannot continue training')
             }
+            const {values, grads} = this.optPolicy.computeGradients(optFunc)
+            this.optPolicy.applyGradients(grads)
+            const kl = tf.mean(tf.sub(
+                logprobabilityBufferT,
+                this.logProb(this.actor.predict(observationBufferT), actionBufferT)
+            ))
+            return kl.arraySync()
         })
     }
 
     trainValue(observationBufferT, returnBufferT) {
         const optFunc = () => {
-            try {
-                const valuesPredT = this.critic.predict(observationBufferT)
-                return tf.losses.meanSquaredError(returnBufferT, valuesPredT)
-            } catch (error) {
-                return tf.scalar(0) // Return dummy loss
-            }
+            const valuesPredT = this.critic.predict(observationBufferT)
+            return tf.losses.meanSquaredError(returnBufferT, valuesPredT)
         }
                 
         tf.tidy(() => {
-            try {
-                const {values, grads} = this.optValue.computeGradients(optFunc)
-                this.optValue.applyGradients(grads)
-            } catch (error) {
-                // Handle silently
+            // Check if models are still valid before using them
+            if (this.critic.isDisposed || this.optValue.disposed) {
+                throw new Error('Critic model or optimizer has been disposed - cannot continue training')
             }
+            const {values, grads} = this.optValue.computeGradients(optFunc)
+            this.optValue.applyGradients(grads)
         })
     }
 
@@ -517,11 +505,7 @@ class PPO {
             // Update global timestep counter
             this.numTimesteps += 1 
 
-            try {
-                callback.onStep(this)
-            } catch (error) {
-                // Handle callback errors silently
-            }
+            callback.onStep(this)
 
             this.buffer.add(
                 this.lastObservation, 
