@@ -37,7 +37,7 @@ class MockEnv {
 }
 
 // Import PPO - handle both browser and node environments
-const PPO = require('../ppo.js');
+import PPO from '../src/ppo.js';
 
 describe('PPO Advanced Training Tests', () => {
     let env;

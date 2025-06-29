@@ -1,15 +1,19 @@
-// Test setup file for Jest
+// Test setup file for Vitest
 // This file runs before each test file
 
-// Use actual TensorFlow.js library
-global.tf = require('@tensorflow/tfjs');
+import { vi } from 'vitest';
+import * as tf from '@tensorflow/tfjs';
+import '@testing-library/jest-dom';
+
+// Make TensorFlow.js available globally
+global.tf = tf;
 
 // Reduce console noise in tests
 const originalWarn = console.warn;
 const originalLog = console.log;
 
-console.warn = jest.fn();
-console.log = jest.fn();
+console.warn = vi.fn();
+console.log = vi.fn();
 
 // Restore console methods after tests if needed
 global.restoreConsole = () => {
