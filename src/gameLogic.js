@@ -1,5 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
-import { PPO } from './ppo.js';
+import PPO from './ppo.js';
 import { rewardConfigs } from './config.js';
 import { 
     Vec, 
