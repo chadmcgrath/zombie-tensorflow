@@ -5,7 +5,7 @@ function log () {
     console.log('[PPO]', ...arguments)
 }
 
-class BaseCallback {
+export class BaseCallback {
     constructor() {
         this.nCalls = 0
     }
@@ -37,7 +37,7 @@ class BaseCallback {
     }
 }
 
-class FunctionalCallback extends BaseCallback {
+export class FunctionalCallback extends BaseCallback {
     constructor(callback) {
         super()
         this.callback = callback
@@ -51,7 +51,7 @@ class FunctionalCallback extends BaseCallback {
     }
 }
 
-class DictCallback extends BaseCallback {
+export class DictCallback extends BaseCallback {
     constructor(callback) {
         super()
         this.callback = callback
@@ -89,7 +89,7 @@ class DictCallback extends BaseCallback {
     }
 }
 
-class Buffer {
+export class Buffer {
     constructor(bufferConfig) {
         const bufferConfigDefault = {
             gamma: 0.99,
@@ -121,42 +121,15 @@ class Buffer {
     }
 
     finishTrajectory(lastValue) {
-        if (!isFinite(lastValue)) {
-            throw new Error(`Invalid lastValue: ${lastValue}. Model is broken - training cannot continue.`)
-        }
-        
         const rewards = this.rewardBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
             .concat(lastValue * this.gamma)
-            
         const values = this.valueBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
             .concat(lastValue)
-            
-        // Check for invalid rewards
-        rewards.forEach((r, i) => {
-            if (!isFinite(r)) {
-                throw new Error(`Invalid reward at step ${i}: ${r}. Environment or model is broken.`)
-            }
-        })
-        
-        // Check for invalid values
-        values.forEach((v, i) => {
-            if (!isFinite(v)) {
-                throw new Error(`Invalid value at step ${i}: ${v}. Model is broken - cannot continue training.`)
-            }
-        })
-            
         const deltas = rewards
             .slice(0, -1)
-            .map((reward, ri) => {
-                const delta = reward - (values[ri] - this.gamma * values[ri + 1])
-                if (!isFinite(delta)) {
-                    throw new Error(`Invalid advantage delta at step ${ri}: ${delta}. Model computation is broken.`)
-                }
-                return delta
-            })
-            
+            .map((reward, ri) => reward - (values[ri] - this.gamma * values[ri + 1]))
         this.advantageBuffer = this.advantageBuffer
             .concat(this.discountedCumulativeSums(deltas, this.gamma * this.lam))
         this.returnBuffer = this.returnBuffer
@@ -169,25 +142,8 @@ class Buffer {
             tf.moments(this.advantageBuffer).variance.sqrt().arraySync()
         ])
         
-        // Check for invalid advantage statistics
-        if (!isFinite(advantageMean)) {
-            throw new Error(`Invalid advantage mean: ${advantageMean}. Model is broken - cannot normalize advantages.`)
-        }
-        if (!isFinite(advantageStd)) {
-            throw new Error(`Invalid advantage std: ${advantageStd}. Model is broken - cannot normalize advantages.`)
-        }
-        
-        // Handle zero or very small standard deviation to prevent division by zero
-        const safeStd = Math.max(advantageStd, 1e-8)
-        
         this.advantageBuffer = this.advantageBuffer
-            .map((advantage, i) => {
-                const normalized = (advantage - advantageMean) / safeStd
-                if (!isFinite(normalized)) {
-                    throw new Error(`Invalid normalized advantage at index ${i}: ${normalized}. Model is broken.`)
-                }
-                return normalized
-            })
+            .map(advantage => (advantage - advantageMean) / advantageStd)
         
         return [
             this.observationBuffer,
@@ -213,7 +169,7 @@ class Buffer {
 
 }
 
-class PPO {
+export class PPO {
     constructor(env, config) {
         const configDefault = {
             nSteps: 512,
@@ -404,10 +360,6 @@ class PPO {
         }
     
         return tf.tidy(() => {
-            // Check if models are still valid before using them
-            if (this.actor.isDisposed || this.optPolicy.disposed) {
-                throw new Error('Actor model or optimizer has been disposed - cannot continue training')
-            }
             const {values, grads} = this.optPolicy.computeGradients(optFunc)
             this.optPolicy.applyGradients(grads)
             const kl = tf.mean(tf.sub(
@@ -425,10 +377,6 @@ class PPO {
         }
                 
         tf.tidy(() => {
-            // Check if models are still valid before using them
-            if (this.critic.isDisposed || this.optValue.disposed) {
-                throw new Error('Critic model or optimizer has been disposed - cannot continue training')
-            }
             const {values, grads} = this.optValue.computeGradients(optFunc)
             this.optValue.applyGradients(grads)
         })
@@ -437,10 +385,10 @@ class PPO {
     _initCallback(callback) {
         // Function, not class
         if (typeof callback === 'function') {
-            if (callback.prototype === undefined || callback.prototype.constructor === callback) {
+            if (callback.prototype.constructor === undefined) {
                 return new FunctionalCallback(callback)
             }
-            return new callback()
+            return callback
         }
         if (typeof callback === 'object') {
             return new DictCallback(callback)
@@ -509,7 +457,7 @@ class PPO {
 
             this.buffer.add(
                 this.lastObservation, 
-                clippedAction, 
+                action, 
                 reward, 
                 value, 
                 logprobability

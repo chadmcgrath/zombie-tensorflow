@@ -4,7 +4,7 @@ import('./src/config.js').then(config => {
     return import('./src/utilities.js');
 }).then(utilities => {
     console.log('Utilities loaded:', Object.keys(utilities));
-    return import('./src/ppo1.js');
+    return import('./src/ppo.js');
 }).then(ppo => {
     console.log('PPO loaded:', Object.keys(ppo));
     return import('./src/gameLogic.js');
