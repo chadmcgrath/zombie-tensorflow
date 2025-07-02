@@ -383,17 +383,19 @@ export class PPO {
     }
 
     _initCallback(callback) {
-        // Function, not class
-        if (typeof callback === 'function') {
-            if (callback.prototype.constructor === undefined) {
-                return new FunctionalCallback(callback)
-            }
+        if (callback instanceof BaseCallback) {
             return callback
         }
-        if (typeof callback === 'object') {
+
+        if (typeof callback === 'function') {
+            return new FunctionalCallback(callback)
+        }
+
+        if (typeof callback === 'object' && callback !== null) {
             return new DictCallback(callback)
         }
-        return new BaseCallback() 
+
+        return new BaseCallback()
     }
     async getSample(lastObservation)
     {        
