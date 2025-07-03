@@ -224,7 +224,7 @@ export class PPO {
 
         // Initialize logStd (for continuous action space)
         if (this.env.actionSpace.class == 'Box') {
-            this.logStd = tf.variable(tf.zeros([this.env.actionSpace.shape[0]]), true, 'logStd')
+            this.logStd = tf.variable(tf.zeros([this.env.actionSpace.shape[0]]), true);
         }
 
         // Initialize optimizers
