@@ -15,22 +15,28 @@ RUN apk add --no-cache \
     pixman-dev \
     pangomm-dev \
     libjpeg-turbo-dev \
-    freetype-dev
+    freetype-dev \
+    bash
 
 # Copy package files first for better Docker layer caching
 COPY package.json package-lock.json ./
 
-# Install dependencies (including dev dependencies)
-RUN npm ci
+# Clean install to avoid rollup issues
+RUN rm -rf node_modules package-lock.json && npm install
 
 # Copy source code and tests
 COPY src/ ./src/
 COPY test/ ./test/
 COPY public/ ./public/
 COPY index.html vite.config.js eslint.config.js ./
+COPY run_tests.sh ./
+
+# Make run_tests.sh executable
+RUN chmod +x run_tests.sh
 
 # Expose port for development server
 EXPOSE 3000
 
-# Default command for development/testing
-CMD ["npm", "run", "dev"]
+# Set entrypoint to bash
+ENTRYPOINT ["/bin/bash"]
+CMD ["-c", "bash"]
