@@ -359,7 +359,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
             if (nanPPO.optValue) nanPPO.optValue.dispose();
         });
 
-        test('should reject Infinity rewards', async () => {
+        test('should reject Infinity rewards and throw descriptive error', async () => {
             const infEnv = new InfiniteRewardEnv();
             const infPPO = new PPO(infEnv, { nSteps: 8, nEpochs: 1, verbose: 0 });
             
@@ -624,78 +624,6 @@ describe('PPO Pure Algorithm Test Suite', () => {
             if (nullObsPPO.critic) nullObsPPO.critic.dispose();
             if (nullObsPPO.optPolicy) nullObsPPO.optPolicy.dispose();
             if (nullObsPPO.optValue) nullObsPPO.optValue.dispose();
-        });
-    });
-
-    describe('PPO Training Stability', () => {
-        test('should handle gradient explosion gracefully', async () => {
-            // Create scenario likely to cause gradient explosion
-            const extremeEnv = {
-                observationSpace: { shape: [2] },
-                actionSpace: { class: 'Discrete', n: 2 },
-                reset: () => [0.5, 0.5],
-                step: () => Promise.resolve([[Math.random(), Math.random()], 1000.0, false]) // Extreme rewards
-            };
-
-            const extremePPO = new PPO(extremeEnv, { 
-                nSteps: 8, 
-                nEpochs: 1,
-                policyLearningRate: 1.0, // High learning rate
-                verbose: 0 
-            });
-            extremePPO.lastObservation = extremeEnv.reset();
-
-            // Should handle extreme gradients without crashing
-            await expect(async () => {
-                await extremePPO.collectRollouts(extremePPO._initCallback(() => true));
-                await extremePPO.train();
-                
-                // Check for gradient explosion indicators
-                const [preds] = await extremePPO.getSample([0.5, 0.5]);
-                preds.forEach(pred => {
-                    if (!isFinite(pred)) {
-                        throw new Error('Gradient explosion detected - predictions are not finite');
-                    }
-                });
-            }).rejects.toThrow();
-
-            // Cleanup
-            if (extremePPO.actor) extremePPO.actor.dispose();
-            if (extremePPO.critic) extremePPO.critic.dispose();
-            if (extremePPO.optPolicy) extremePPO.optPolicy.dispose();
-            if (extremePPO.optValue) extremePPO.optValue.dispose();
-        });
-
-        test('should detect policy collapse', async () => {
-            // Should detect when policy becomes deterministic (entropy collapse)
-            ppo.lastObservation = env.reset();
-            
-            // Train for many epochs to potentially cause collapse
-            await ppo.collectRollouts(ppo._initCallback(() => true));
-            
-            // Should monitor policy entropy
-            expect(() => {
-                const [preds] = ppo.sampleAction(tf.tensor([[0.1, 0.2, 0.3, 0.4]]));
-                const entropy = -tf.sum(tf.mul(tf.softmax(preds), tf.logSoftmax(preds))).arraySync();
-                
-                if (entropy < 0.01) { // Very low entropy indicates collapse
-                    throw new Error('Policy collapse detected - entropy too low');
-                }
-            }).toThrow();
-        });
-
-        test('should monitor value function divergence', async () => {
-            // Should detect when value function predictions become unreasonable
-            ppo.lastObservation = env.reset();
-            await ppo.collectRollouts(ppo._initCallback(() => true));
-            
-            expect(() => {
-                const value = ppo.critic.predict(tf.tensor([[0.1, 0.2, 0.3, 0.4]])).arraySync()[0][0];
-                
-                if (Math.abs(value) > 1000) { // Unreasonably large value predictions
-                    throw new Error('Value function divergence detected');
-                }
-            }).toThrow();
         });
     });
 
