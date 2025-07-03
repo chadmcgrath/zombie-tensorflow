@@ -184,7 +184,9 @@ export class PPO {
                 'vf': [32, 32]
             },
             activation: 'relu',
-            verbose: 0
+            verbose: 0,
+            gamma: 0.9,    
+            lam: 0.95 
         }
         this.config = Object.assign({}, configDefault, config)
 

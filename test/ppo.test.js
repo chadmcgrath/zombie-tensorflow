@@ -147,8 +147,8 @@ describe('PPO Pure Algorithm Test Suite', () => {
     // ===== PURE PPO ALGORITHM TESTS (SHOULD FAIL WITH CURRENT PPO) =====
 
     describe('PPO Parameter Validation', () => {
-        test('should reject invalid parameters', () => {
-            // Should reject negative learning rates
+        test('should reject negative learning rates', () => {
+            // Should reject negative policy learning rate
             expect(() => {
                 new PPO(env, { 
                     policyLearningRate: -0.001,
@@ -157,6 +157,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
+            // Should reject negative value learning rate
             expect(() => {
                 new PPO(env, { 
                     policyLearningRate: 0.001,
@@ -164,8 +165,10 @@ describe('PPO Pure Algorithm Test Suite', () => {
                     verbose: 0 
                 });
             }).toThrow();
+        });
 
-            // Should reject invalid clip ratios
+        test('should reject invalid clip ratios', () => {
+            // Should reject negative clip ratio
             expect(() => {
                 new PPO(env, { 
                     clipRatio: -0.1,
@@ -173,6 +176,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
             
+            // Should reject zero clip ratio
             expect(() => {
                 new PPO(env, { 
                     clipRatio: 0,
@@ -180,14 +184,17 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
+            // Should reject excessively large clip ratio
             expect(() => {
                 new PPO(env, { 
                     clipRatio: 2.0,
                     verbose: 0 
                 });
             }).toThrow();
+        });
 
-            // Should reject invalid target KL
+        test('should reject invalid target KL values', () => {
+            // Should reject negative target KL
             expect(() => {
                 new PPO(env, { 
                     targetKL: -0.01,
@@ -195,14 +202,17 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
+            // Should reject zero target KL
             expect(() => {
                 new PPO(env, { 
                     targetKL: 0,
                     verbose: 0 
                 });
             }).toThrow();
+        });
 
-            // Should reject invalid nSteps
+        test('should reject invalid step counts', () => {
+            // Should reject zero nSteps
             expect(() => {
                 new PPO(env, { 
                     nSteps: 0,
@@ -210,6 +220,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
             
+            // Should reject negative nSteps
             expect(() => {
                 new PPO(env, { 
                     nSteps: -5,
@@ -217,7 +228,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
-            // Should reject invalid nEpochs
+            // Should reject zero nEpochs
             expect(() => {
                 new PPO(env, { 
                     nEpochs: 0,
@@ -225,14 +236,17 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
+            // Should reject negative nEpochs
             expect(() => {
                 new PPO(env, { 
                     nEpochs: -3,
                     verbose: 0 
                 });
             }).toThrow();
+        });
 
-            // Should reject invalid gamma (discount factor bounds)
+        test('should reject invalid gamma values', () => {
+            // Should reject negative gamma (discount factor)
             expect(() => {
                 new PPO(env, { 
                     gamma: -0.1,
@@ -240,14 +254,17 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
+            // Should reject gamma > 1.0 (discount factor)
             expect(() => {
                 new PPO(env, { 
                     gamma: 1.5,
                     verbose: 0 
                 });
             }).toThrow();
+        });
 
-            // Should reject invalid lambda (GAE parameter bounds)
+        test('should reject invalid lambda values', () => {
+            // Should reject negative lambda (GAE parameter)
             expect(() => {
                 new PPO(env, { 
                     lam: -0.1,
@@ -255,6 +272,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).toThrow();
 
+            // Should reject lambda > 1.0 (GAE parameter)
             expect(() => {
                 new PPO(env, { 
                     lam: 1.5,
