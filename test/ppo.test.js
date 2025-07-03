@@ -680,6 +680,97 @@ describe('PPO Pure Algorithm Test Suite', () => {
             }).toThrow();
         });
 
+        test('should detect problematic parameter combinations', () => {
+            // Very high target KL with very low clip ratio creates instability
+            expect(() => {
+                new PPO(env, { 
+                    targetKL: 0.09,
+                    clipRatio: 0.01,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should validate learning rate ratios for stability', () => {
+            // Policy learning rate much higher than value learning rate can cause instability
+            expect(() => {
+                new PPO(env, { 
+                    policyLearningRate: 0.1,
+                    valueLearningRate: 1e-6,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should reject configurations that break PPO assumptions', () => {
+            // Very low gamma with high lambda creates mathematical inconsistency
+            expect(() => {
+                new PPO(env, { 
+                    gamma: 0.01,
+                    lam: 0.99,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should validate epoch-to-steps ratio for efficiency', () => {
+            // Too many epochs relative to steps can cause overfitting
+            expect(() => {
+                new PPO(env, { 
+                    nSteps: 4,
+                    nEpochs: 100,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should detect network architecture imbalances', () => {
+            // Extremely different network sizes can cause training issues
+            expect(() => {
+                new PPO(env, { 
+                    netArch: {
+                        'pi': [1024, 1024, 1024],
+                        'vf': [2]
+                    },
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should validate numerical precision requirements', () => {
+            // Combination of very small clip ratio and very small target KL
+            expect(() => {
+                new PPO(env, { 
+                    clipRatio: 1e-8,
+                    targetKL: 1e-9,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should reject pathological activation combinations', () => {
+            // Linear activation with very high learning rates can cause instability
+            expect(() => {
+                new PPO(env, { 
+                    activation: 'linear',
+                    policyLearningRate: 0.5,
+                    valueLearningRate: 0.5,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
+        test('should validate temporal consistency parameters', () => {
+            // Very high discount factor with very low GAE lambda creates inconsistency
+            expect(() => {
+                new PPO(env, { 
+                    gamma: 0.999,
+                    lam: 0.001,
+                    verbose: 0 
+                });
+            }).toThrow();
+        });
+
         test('should handle callback state corruption', async () => {
             // Callback that corrupts PPO state
             const corruptingCallback = ppo._initCallback((alg) => {
