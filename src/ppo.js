@@ -135,15 +135,24 @@ export class Buffer {
         this.returnBuffer = this.returnBuffer
             .concat(this.discountedCumulativeSums(rewards, this.gamma).slice(0, -1))
     }
+    calculateAdvantages(mean, std) {
+        return this.advantageBuffer.map(advantage => (advantage - mean) / std);
+    }
 
+    hasData() {
+        return this.advantageBuffer.length > 0;
+    }
+
+    canCalculateStats() {
+        return this.advantageBuffer.length > 1;
+    }
     get() {
         const [advantageMean, advantageStd] = tf.tidy(() => [
             tf.mean(this.advantageBuffer).arraySync(),
             tf.moments(this.advantageBuffer).variance.sqrt().arraySync()
         ])
         
-        this.advantageBuffer = this.advantageBuffer
-            .map(advantage => (advantage - advantageMean) / advantageStd)
+        this.advantageBuffer = this.calculateAdvantages(advantageMean, advantageStd);
         
         return [
             this.observationBuffer,
