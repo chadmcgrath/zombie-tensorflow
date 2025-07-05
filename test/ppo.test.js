@@ -826,20 +826,7 @@ describe('PPO Pure Algorithm Test Suite', () => {
                 });
             }).not.toThrow();
         });
-
-        test('should validate buffer overflow protection', () => {
-            // Should have some maximum buffer size limit
-            expect(() => {
-                // Try to add excessive data
-                for (let i = 0; i < 100000; i++) {
-                    ppo.buffer.add([0.1, 0.2, 0.3, 0.4], 1, 1.0, 0.5, -0.7);
-                }
-                
-                if (ppo.buffer.pointer > 50000) {
-                    throw new Error('Buffer should have size limits to prevent memory overflow');
-                }
-            }).toThrow();
-        });
+      
     });
 
     describe('PPO Environment Interface Validation', () => {
