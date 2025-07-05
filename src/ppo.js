@@ -98,6 +98,15 @@ export class Buffer {
         this.bufferConfig = Object.assign({}, bufferConfigDefault, bufferConfig)
         this.gamma = this.bufferConfig.gamma
         this.lam = this.bufferConfig.lam
+
+        // Validate
+        if (this.gamma < 0 || this.gamma > 1) {
+            throw new Error(`gamma must be in [0,1]: ${this.gamma}`);
+        }
+        if (this.lam < 0 || this.lam > 1) {
+            throw new Error(`lam must be in [0,1]: ${this.lam}`);
+        }
+
         this.reset()
     }
 
@@ -110,17 +119,29 @@ export class Buffer {
         this.pointer += 1
     }
 
-    discountedCumulativeSums (arr, coeff) {
+    discountedCumulativeSums(arr, coeff) {
+        if (coeff < 0 || coeff > 1) {
+            throw new Error(`coeff must be in [0,1] for discounted sums: ${coeff}`);
+        }
         let res = []
         let s = 0
         arr.reverse().forEach(v => {
+            if (!isFinite(v)) {
+                throw new Error(`Array values must be finite: ${v}`);
+            }
             s = v + s * coeff
+            if (!isFinite(s)) {
+                throw new Error(`Cumulative sum overflow: ${s}`);
+            }
             res.push(s)
         })
         return res.reverse()
     }
 
     finishTrajectory(lastValue) {
+        if (!isFinite(lastValue)) {
+            throw new Error(`lastValue must be finite: ${lastValue}`);
+        }
         const rewards = this.rewardBuffer
             .slice(this.trajectoryStartIndex, this.pointer)
             .concat(lastValue * this.gamma)
@@ -135,6 +156,7 @@ export class Buffer {
         this.returnBuffer = this.returnBuffer
             .concat(this.discountedCumulativeSums(rewards, this.gamma).slice(0, -1))
     }
+    
     calculateAdvantages(mean, std) {
         return this.advantageBuffer.map(advantage => (advantage - mean) / std);
     }
@@ -199,6 +221,9 @@ export class PPO {
         }
         this.config = Object.assign({}, configDefault, config)
 
+        // Validate config parameters
+        this._validateConfig();
+
         // Prepare network architecture
         if (Array.isArray(this.config.netArch)) {
             this.config.netArch = {
@@ -241,6 +266,31 @@ export class PPO {
         // Initialize optimizers
         this.optPolicy = tf.train.adam(this.config.policyLearningRate)
         this.optValue = tf.train.adam(this.config.valueLearningRate)
+    }
+    _validateConfig() {
+        const requiredPositive = ['nSteps', 'nEpochs', 'policyLearningRate', 'valueLearningRate', 'targetKL'];
+        requiredPositive.forEach(key => {
+            if (this.config[key] <= 0) {
+                throw new Error(`${key} must be positive: ${this.config[key]}`);
+            }
+        });
+
+        if (this.config.clipRatio <= 0 || this.config.clipRatio > 0.5) {
+            throw new Error(`clipRatio must be in (0, 0.5]: ${this.config.clipRatio}`);
+        }
+
+        if (this.config.gamma < 0 || this.config.gamma > 1) {
+            throw new Error(`gamma must be in [0,1]: ${this.config.gamma}`);
+        }
+
+        if (this.config.lam < 0 || this.config.lam > 1) {
+            throw new Error(`lam must be in [0,1]: ${this.config.lam}`);
+        }
+
+        // Validate netArch
+        if (!Array.isArray(this.config.netArch.pi) || !Array.isArray(this.config.netArch.vf)) {
+            throw new Error('netArch.pi and netArch.vf must be arrays');
+        }
     }
 
     createActor() {
@@ -318,6 +368,9 @@ export class PPO {
     
     logProbNormal(loc, scale, x) {
         return tf.tidy(() => {
+            if (tf.any(tf.lessEqual(scale, 0)).arraySync()) {
+                throw new Error('Scale must be positive in logProbNormal');
+            }
             const logUnnormalized = tf.mul(
                 -0.5,
                 tf.square(
